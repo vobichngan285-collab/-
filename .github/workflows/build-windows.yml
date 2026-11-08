@@ -79,6 +79,19 @@ jobs:
           if (($process.ExitCode -ne 0) -or (-not $report.StartsWith('PASS'))) {
             throw "Frozen OCR failed; exit=$($process.ExitCode)"
           }
+      - name: Verify bundled SAPI and WinRT voice API
+        shell: pwsh
+        run: |
+          $testLog = Join-Path $env:TEMP 'GameTextReader_tts_selftest.txt'
+          Remove-Item $testLog -Force -ErrorAction SilentlyContinue
+          $exe = (Resolve-Path 'dist/GameTextReader/GameTextReader.exe').Path
+          $process = Start-Process -FilePath $exe -ArgumentList '--self-test-tts' -Wait -PassThru
+          if (-not (Test-Path $testLog)) { throw 'Frozen EXE did not produce voice API verification' }
+          $report = Get-Content $testLog -Raw
+          Write-Output $report
+          if (($process.ExitCode -ne 0) -or (-not $report.StartsWith('PASS'))) {
+            throw "Packaged speech API failed (exit=$($process.ExitCode))"
+          }
       - name: Assemble ONLY portable ZIP
         shell: pwsh
         run: |
