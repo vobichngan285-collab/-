@@ -35,7 +35,9 @@ jobs:
         run: |
           $env:PYTHONPATH = (Get-Location).Path
           python -m pytest -q tests
+          if ($LASTEXITCODE -ne 0) { throw 'A unit test failed; packaging is forbidden' }
           python -m compileall -q main.py game_reader
+          if ($LASTEXITCODE -ne 0) { throw 'Source compileall failed' }
       - name: Prepare official PP-OCRv6 Small and Medium ONNX weights
         shell: pwsh
         run: |
