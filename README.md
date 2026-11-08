@@ -1,3 +1,28 @@
+# V1.5 独立广荣 TTS 兼容性实验版 · 2026-11-09
+
+本项目 Windows 11 x64、完全离线 OCR，免安装 ZIP（不需要安装保益悦听、NVDA 或另外寻找 DLL）。
+
+**[下载 V1.5 免安装 ZIP](https://github.com/vobichngan285-collab/-/actions/runs/42513309243/artifacts/13630307332)**：解压运行 `GameTextReader/GameTextReader.exe`。GitHub Actions artifact 外层可能还有一个 ZIP。用户可从聊天直接获取已校验 ZIP。
+
+### 这次实验怎么操作
+1. 完全退出旧版程序，将 V1.5 解压到新目录，运行 EXE。
+2. 点击 **「一键准备独立广荣 TTS（首次需要联网）」**。本按钮自动从沈广荣 Github 官方发行版 1.1.0 下载 **158,891,643 bytes** 的 `.nvda-addon` 原版，校验 GitHub 发行资产 SHA-256 `14ba0d4155549a1e4b76335687c960815c87e16f3e34907e1476d206c3609a77`，解压里面的 `synthDrivers` 到 `%LOCALAPPDATA%\GameTextReader\GuangrongIndependent`。**只下载一次，以后在该设备离线使用**。不捆绑第三方 DLL/自然音库。
+3. 等待语音列表刷新。如果出现「广荣 · ...」，选择该项并点击 **「试听」**。这是完整独立子进程，不向保益发出任何 `BoyCtrl` 调用，也不改变保益的语速/音量。
+4. 点击 **「试听提示音」**，仅发一声清脆的「叮」。F8 识别完成也只发这个提示音；鼠标进入文字框不再发提示音，但仍会按原逻辑朗读文字。
+5. 如果广荣没有出声、没有出现在列表或提示加载失败，点击 **「复制链路日志」** 和 **「复制语音诊断」**，回传日志文本。这次不需要查找任何 DLL。
+
+### 验证与限制
+- [Windows Actions 42513309243](https://github.com/vobichngan285-collab/-/actions/runs/42513309243) **Success**，21 项单元测试通过；源代码和打包 EXE 双档 OCR 中文/英文图片、SAPI+WinRT 合成数据、无障碍 Tk UIA、绿色文字框及完整主窗口初始化均通过。实际游戏画面、用户扬声器仍必须真机验证。
+- 官方发行版中 **32 位 DLL 为 `grtts.dll`、64 位 DLL 为 `grtts_x64.dll`**，V1.4 错用了 32 位文件。新版本现在选择官方 64 位引擎。
+- **兼容性风险：** 在无 NVDA 的干净 Windows 2025 CI 上，`grtts_x64.dll` 使用正确依赖和目录仍在加载阶段报 `WinError 1114`。因此本包定位为**独立广荣兼容性实验**，不声称已经实现自然语音合成。用户机器可能有不同依赖/Windows 环境，须实测。
+- 广荣 1.1.0 官方基础包含永德及默认讯飞，**不包含云希、晓晓等按需下载的微软自然语音包**。这一步首先验证独立引擎，不保证这两种音色已经可用。
+- **保益悦听读屏通道已彻底退出开发路线**。此前未完成的 BoyCtrl 分支已回退至旧 V1.4 main 基准，新版没有 BoyCtrl DLL/代码，保益仍可按自己的语速正常读屏。
+- OCR、绿色框和无障碍依旧用 V1.4 路线。本次仅替换/修正独立 TTS 接入及音效；V1.4 Medium 速度与边角漏字仍是独立待修复事项，不能将本包表述成已经修好了这些问题。
+- 最终 ZIP：`GameTextReader_V1.5_Windows_x64_Portable.zip`，**194,303,280 bytes**，SHA256 `0260fd7001c34cf5efcc7f7e129c8b5258f92c9bbf0288e5cdeca3a9c9c8060f`。已下载到独立环境，CRC 通过，含 EXE+3个官方模型且不含任何 `grtts.dll` 或 `BoyCtrl`。GitHub artifact id **13630307332**；到期 2026-12-08。
+- 完整历史见下方旧版本记录，保持原有提交历史；与安卓蓝星视觉/看字助手无关，Android 仓库没有改动。
+
+---
+
 # 游戏文字助手 V1.4 修复测试版 · 2026-11-09
 
 **Windows 11 x64 · 完全离线 OCR · 免安装 ZIP**。请完整退出旧版本、将 ZIP 解压到新文件夹、运行 `GameTextReader/GameTextReader.exe`。
