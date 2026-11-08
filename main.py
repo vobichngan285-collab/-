@@ -50,11 +50,53 @@ def packaged_tts_selftest() -> int:
         from winrt.windows.media.playback import MediaPlayer
         voices = enumerate_sapi_voices()
         # Not all signed Narrator-only voices are public; this tests the API.
-        log.write_text("PASS\\n" + "\\n".join(v[1] for v in voices), encoding="utf-8")
+        log.write_text("PASS\n" + "\n".join(v[1] for v in voices), encoding="utf-8")
         return 0
     except BaseException:
-        log.write_text("FAIL\\n" + traceback.format_exc(), encoding="utf-8")
+        log.write_text("FAIL\n" + traceback.format_exc(), encoding="utf-8")
         return 1
+
+
+
+
+def packaged_ui_selftest() -> int:
+    """Smoke-test accessible Tk and real four-window pointer frame."""
+    import tempfile
+    import traceback
+    from pathlib import Path
+    log = Path(tempfile.gettempdir()) / "GameTextReader_ui_selftest.txt"
+    root = None
+    overlay = None
+    try:
+        import tkinter as tk
+        from tkinter import ttk
+        import tk_uia
+        from game_reader.overlay import ClickThroughOutline
+        from game_reader.core import OCRLine
+        root = tk.Tk()
+        root.withdraw()
+        control = ttk.Button(root, text="Accessibility test")
+        control.pack()
+        result = tk_uia.enable(root)
+        tk_uia.set_acc_name(control, "OCR 功能按钮")
+        root.update_idletasks()
+        overlay = ClickThroughOutline()
+        overlay.show(OCRLine("Game", 120, 100, 200, 125))
+        if len(overlay.handles) != 4:
+            raise RuntimeError("Expected four separate click-through border windows")
+        overlay.hide()
+        overlay.close()
+        overlay = None
+        log.write_text("PASS\n" + str(result), encoding="utf-8")
+        return 0
+    except BaseException:
+        log.write_text("FAIL\n" + traceback.format_exc(), encoding="utf-8")
+        return 1
+    finally:
+        if overlay:
+            overlay.close()
+        if root:
+            root.destroy()
 
 
 if __name__ == "__main__":
@@ -63,5 +105,7 @@ if __name__ == "__main__":
         raise SystemExit(packaged_ocr_selftest())
     if "--self-test-tts" in sys.argv:
         raise SystemExit(packaged_tts_selftest())
+    if "--self-test-ui" in sys.argv:
+        raise SystemExit(packaged_ui_selftest())
     from game_reader.app import run
     run()
