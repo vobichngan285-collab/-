@@ -56,18 +56,18 @@ class LocalOCR:
         if tier not in TIERS:
             raise ValueError("Unsupported OCR tier")
         if tier != self.loaded_tier:
-            from rapidocr import RapidOCR
+            from rapidocr import RapidOCR, ModelType, EngineType, OCRVersion
             det, rec = (model_root() / name for name in TIERS[tier])
             for path in (det, rec):
                 if not path.is_file() or path.stat().st_size < 100000:
                     raise FileNotFoundError(f"缺少或损坏的离线 OCR 文件：{path}")
             self.engine = RapidOCR(params={
-                "Det.engine_type": "onnxruntime",
-                "Rec.engine_type": "onnxruntime",
-                "Det.ocr_version": "PP-OCRv6",
-                "Rec.ocr_version": "PP-OCRv6",
-                "Det.model_type": tier,
-                "Rec.model_type": tier,
+                "Det.engine_type": EngineType.ONNXRUNTIME,
+                "Rec.engine_type": EngineType.ONNXRUNTIME,
+                "Det.ocr_version": OCRVersion.PPOCRV6,
+                "Rec.ocr_version": OCRVersion.PPOCRV6,
+                "Det.model_type": (ModelType.SMALL if tier == "small" else ModelType.MEDIUM),
+                "Rec.model_type": (ModelType.SMALL if tier == "small" else ModelType.MEDIUM),
                 "Det.model_path": str(det),
                 "Rec.model_path": str(rec),
             })
