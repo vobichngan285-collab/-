@@ -39,7 +39,10 @@ class WinRTSpeechWorker:
 
         synth = SpeechSynthesizer()
         player = MediaPlayer()
-        player.audio_category = MediaPlayerAudioCategory.SPEECH
+        # Media uses the default multimedia endpoint that games normally use.
+        player.audio_category = MediaPlayerAudioCategory.MEDIA
+        player.volume = 1.0
+        player.is_muted = False
         task = None
         generation = 0
 
@@ -56,29 +59,62 @@ class WinRTSpeechWorker:
                 pass
 
         async def synth_and_play(text, expected_generation):
+            ended_token = None
+            failed_token = None
             try:
+                # Hold the SpeechSynthesisStream until MediaEnded or stop;
+                # releasing it as soon as player.play() is called can produce
+                # an ended/empty media source on some desktop environments.
                 stream = await synth.synthesize_text_to_stream_async(text)
                 if expected_generation != generation:
                     return
+                loop = asyncio.get_running_loop()
+                finished = asyncio.Event()
+
+                def on_ended(_sender, _args):
+                    loop.call_soon_threadsafe(finished.set)
+
+                def on_failed(_sender, args):
+                    if self._on_error:
+                        try:
+                            detail = str(args.error_message)
+                        except Exception:
+                            detail = "未能读取 MediaFailed 错误"
+                        self._on_error("WinRT 媒体播放失败：" + detail)
+                    loop.call_soon_threadsafe(finished.set)
+
+                ended_token = player.add_media_ended(on_ended)
+                failed_token = player.add_media_failed(on_failed)
                 player.source = MediaSource.create_from_stream(stream, stream.content_type)
                 player.play()
                 if self._on_event:
-                    self._on_event(f"WinRT 已合成并向播放器提交 {len(text)} 字（不证明扬声器已出声）")
-                # Speech synthesis succeeding does not prove the output device
-                # is playing. Query the WinRT playback state as a separate link.
-                await asyncio.sleep(0.28)
+                    self._on_event(f"WinRT 已生成语音并请求播放 {len(text)} 字")
+                await asyncio.sleep(0.35)
                 if expected_generation == generation and self._on_event:
-                    try:
-                        state = str(player.playback_session.playback_state)
-                        self._on_event("WinRT 播放器状态：" + state +
-                                       "；如仍无声，请检查系统音量混合器和输出设备")
-                    except Exception as exc:
-                        self._on_event(f"WinRT 无法查询播放状态：{exc}")
+                    self._on_event(
+                        "WinRT 播放器状态：" +
+                        str(player.playback_session.playback_state) +
+                        "，音量：" + str(player.volume))
+                await asyncio.wait_for(finished.wait(), timeout=90)
             except asyncio.CancelledError:
                 pass
+            except asyncio.TimeoutError:
+                if self._on_error:
+                    self._on_error("WinRT 播放 90 秒仍未结束，已重置播放器")
             except Exception as exc:
                 if self._on_error:
                     self._on_error("WinRT 朗读: " + str(exc))
+            finally:
+                if ended_token is not None:
+                    try:
+                        player.remove_media_ended(ended_token)
+                    except Exception:
+                        pass
+                if failed_token is not None:
+                    try:
+                        player.remove_media_failed(failed_token)
+                    except Exception:
+                        pass
 
         while True:
             try:
