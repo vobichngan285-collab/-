@@ -40,6 +40,14 @@ jobs:
         shell: pwsh
         run: |
           python prepare_models.py
+      - name: Inspect BOTH OCR tiers against English and synthetic Chinese menu (source)
+        shell: pwsh
+        run: |
+          $testLog = Join-Path $env:TEMP 'GameTextReader_ocr_selftest.txt'
+          Remove-Item $testLog -Force -ErrorAction SilentlyContinue
+          python main.py --self-test-ocr
+          if (Test-Path $testLog) { Get-Content $testLog }
+          if ($LASTEXITCODE -ne 0) { throw 'Source OCR recognition probe failed' }
       - name: Build lean portable EXE folder
         shell: pwsh
         run: |

@@ -43,6 +43,7 @@ def packaged_ocr_selftest() -> int:
         installed_font = next((p for p in font_candidates
                               if Path(p).is_file()), None)
         if installed_font:
+            report.append("Chinese synthetic font=" + installed_font)
             dark = Image.new("RGB", (1400, 460), (25, 28, 37))
             dark_draw = ImageDraw.Draw(dark)
             cn = ImageFont.truetype(installed_font, 92)
@@ -55,13 +56,14 @@ def packaged_ocr_selftest() -> int:
                               "|".join(row.text for row in cn_lines))
                 if not any(any("\\u4e00" <= ch <= "\\u9fff" for ch in row.text)
                            for row in cn_lines):
-                    raise RuntimeError(f"{tier}: no Chinese characters on dark menu")
+                    raise RuntimeError(f"{tier}: no Chinese characters on dark menu; "
+                                       f"raw={cn_timing['raw_lines']}, lines={cn_lines}")
         else:
             report.append("CJK font missing from CI runner; skip Chinese visual probe")
         log_path.write_text("PASS\n" + "\n".join(report), encoding="utf-8")
         return 0
     except BaseException:
-        log_path.write_text("FAIL\n" + traceback.format_exc(), encoding="utf-8")
+        log_path.write_text("FAIL\n" + "\n".join(locals().get("report", [])) + "\n" + traceback.format_exc(), encoding="utf-8")
         return 1
 
 
