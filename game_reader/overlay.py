@@ -35,7 +35,7 @@ class WNDCLASSW(ctypes.Structure):
         ("cbWndExtra", ctypes.c_int),
         ("hInstance", wintypes.HINSTANCE),
         ("hIcon", wintypes.HICON),
-        ("hCursor", wintypes.HCURSOR),
+        ("hCursor", wintypes.HANDLE),
         ("hbrBackground", wintypes.HBRUSH),
         ("lpszMenuName", wintypes.LPCWSTR),
         ("lpszClassName", wintypes.LPCWSTR),
