@@ -134,3 +134,20 @@
 - 发布唯一免安装 ZIP：`GameTextReader_V1.4_Windows_x64_Portable.zip`，194319209 bytes /185.3MiB；SHA256 `6bd0f223e07a6c6117bd08a752484fba8484aa641efeeaf8320df62c4a8b6ddd`；ZIP CRC pass，内含 EXE+3个官方 ONNX 模型、不含 grtts.dll／medium DET。GitHub Artifact https://github.com/vobichngan285-collab/-/actions/runs/42508035692/artifacts/13627842980；2026-12-08 到期。
 - **未验证**：用户电脑真实声卡播放完成音/鼠标音、用户保益悦听已安装广荣 DLL 的独立调用、讲述人专有云希/晓晓可独立合成、真实游戏悬停顺序和性能。不得将 CI 通过冒充这些环节已经修好。
 - 本仓库仅电脑游戏文字助手 `vobichngan285-collab/-`；未触碰 Android `kanzi-assistant`。
+
+
+## V1.5 · 2026-11-09 · 独立广荣初步实验包与真实限制
+
+**用户授权事项**：清理 V1.5 未完成的保益 BoyCtrl 语音通道接入；不再共用保益音量、语速、语音中断；继续广荣独立引擎的第一轮真实实验；生成可安装运行的包供用户测试。用户此前还指定取消鼠标进入文字区域的提示音，F8 识别完成只响一次清脆「叮」声，保留试听按钮。
+
+**完成的代码与 GitHub 操作**：
+- 将未完成分支 `game-text-reader-v15-baoyi-channel-20261109` 通过 force-with-lease 回退到 V1.4 main（该开发分支原未发布，未合入 main），新建 `game-text-reader-v15-guangrong-independent-20261109`；新分支**没有 BoyCtrl 适配器或对保益的调用**。
+- 调查沈广荣官方下载 `https://github.com/shenguangrong/grtts_nvda_plugin/releases/tag/1.1.0`：经 GitHub Windows CI 真正下载并验证原版包 SHA256 `14ba0d4155549a1e4b76335687c960815c87e16f3e34907e1476d206c3609a77`。包中既有 32 位 `synthDrivers/grtts.dll`，又有 64 位 `synthDrivers/grtts_x64.dll`；V1.4 实验一直选择前者，64位程序会出现 `WinError 193`。V1.5 纠正为 64 位原版引擎。
+- 继续独立 x64 运行测试：Windows 2025 CI 解压完整包，`Microsoft.CognitiveServices.Speech.core.dll`、`msc_x64.dll`、`SpeechSDKShim.dll` 可加载，但尝试 `ctypes.CDLL(grtts_x64.dll)` 在该环境返回 **WinError 1114**（DLL 初始化例程失败）。**这一步不是成功，不能声称独立的广荣微软音色已经工作**。原因仍待用户系统实测及进一步合法排查。相关 Windows Actions `42512423970`、`42512526713`、`42512625861`。
+- 新增 `game_reader/guangrong_setup.py`：Tk 界面按钮「一键准备独立广荣 TTS」仅由用户点击后触发下载，联网仅首次获取158.9MB的作者官方原始发行包。检查固定SHA256、ZIP CRC、安全解压路径与体积限制，仅提取 `synthDrivers` 内容至 `%LOCALAPPDATA%\GameTextReader\GuangrongIndependent`，不拷贝、改动、控制保益或 NVDA 的运行时。
+- 修订 `game_reader/guangrong_tts.py`：只允许 64 位 `grtts_x64.dll`，以独立子进程隔离崩溃并记录初始化报错、合成状态。应用启动时只使用**本软件目录安装**，不查找保益或 NVDA 语音目录，取消需要用户手动浏览 DLL 的 GUI 入口；并保留原有 SAPI/WinRT 正规可用本地声音作为对照。
+- 改造原有「试听提示音」成只响一次较长的明亮原创金属叮声；F8 成功播放一次，鼠标悬停不再触发任何音效。OCR 小/混合 Medium、绿色框、保益可读的 Tk 无障碍界面和 60 秒 OCR 清空保持原样，绝不重新增加自动画面监测。
+- 扩充测试至 **21 项全部通过**：64位DLL路径映射、官方 SHA 固定、真实一键下载-解压流程的无联网模拟、错误 SHA 拒绝、提示音格式、OCR模型分流、无障碍原逻辑。CI 中实际执行 Frozen EXE 模型中英文图测试、SAPI/WinRT 合成、UIA/绿色框测试、完整窗口启动，成功 Actions [42513309243](https://github.com/vobichngan285-collab/-/actions/runs/42513309243)。
+- 交付 ZIP `GameTextReader_V1.5_Windows_x64_Portable.zip`；GitHub Actions Artifact [13630307332](https://github.com/vobichngan285-collab/-/actions/runs/42513309243/artifacts/13630307332)；194,303,280字节；SHA256 `0260fd7001c34cf5efcc7f7e129c8b5258f92c9bbf0288e5cdeca3a9c9c8060f`；本地CRC通过，独立文件中验证存在 EXE+三套官方 PP-OCRv6 模型，绝不包含供应商 grtts DLL 与保益代码。
+- 真实用户尚待验证：广荣x64 DLL在安装了保益但独立运行的系统能否加载；输出默认永德或讯飞声音，是否实际出声；原版基础发行不包含按需下载安装的微软 NeuralVoices **云希/晓晓**，需后续合法独立安装或兼容验证，不可冒称已实现。若失败请复制「链路日志」和「语音诊断」，区分 `WinError1114`、语音列表为空、PCM生成失败与播放失败。
+- OCR V1.4 第二模式慢、左上/左下角漏字尚在修复列表，**本次只是单独语音实验**；留待后续在同图A/B实测后处理。保留所有旧版历史；Android 仓库没动。
