@@ -8,7 +8,7 @@ from pathlib import Path
 from shutil import copy2
 from PIL import Image, ImageDraw, ImageFont
 import rapidocr
-from rapidocr import RapidOCR
+from rapidocr import RapidOCR, ModelType, EngineType, OCRVersion
 
 ROOT = Path(__file__).resolve().parent
 DEST = ROOT / "models"
@@ -24,12 +24,12 @@ draw.text((65, 210), "SETTINGS", fill="black", font=font)
 for tier in ("small", "medium"):
     print(f"[models] Checking ONNX v6 {tier}", flush=True)
     engine = RapidOCR(params={
-        "Det.engine_type": "onnxruntime",
-        "Rec.engine_type": "onnxruntime",
-        "Det.ocr_version": "PP-OCRv6",
-        "Rec.ocr_version": "PP-OCRv6",
-        "Det.model_type": tier,
-        "Rec.model_type": tier,
+        "Det.engine_type": EngineType.ONNXRUNTIME,
+        "Rec.engine_type": EngineType.ONNXRUNTIME,
+        "Det.ocr_version": OCRVersion.PPOCRV6,
+        "Rec.ocr_version": OCRVersion.PPOCRV6,
+        "Det.model_type": (ModelType.SMALL if tier == "small" else ModelType.MEDIUM),
+        "Rec.model_type": (ModelType.SMALL if tier == "small" else ModelType.MEDIUM),
     })
     result = engine(image, use_cls=False)
     found = list(result.txts or [])
