@@ -1,3 +1,20 @@
+# 游戏文字助手 V1.4 修复测试版 · 2026-11-09
+
+**Windows 11 x64 · 完全离线 OCR · 免安装 ZIP**。请完整退出旧版本、将 ZIP 解压到新文件夹、运行 `GameTextReader/GameTextReader.exe`。
+
+- [V1.4 GitHub Actions Windows 成功构建、免安装 ZIP 下载](https://github.com/vobichngan285-collab/-/actions/runs/42508035692/artifacts/13627842980)。聊天还提供了经 CRC 与 SHA256 验证的直接 ZIP。GitHub Artifact 下载本身可能外套一层 ZIP。
+- **第二档由“完整 Medium DET+REC”改成“Small 快速检测 + Medium 识别”**，并按最长边限制检测输入（Small 1280、Medium 1152）。不再反复让耗时的 Medium 检测器做全屏定位。**如实保留检测器区别**，模型选择文字也同步更正。
+- 只内置三个 PP-OCRv6 ONNX 模型：Small DET / Small REC / Medium REC（去掉不用的 Medium DET 权重）。体积减至 **194,319,209 bytes / 185.3 MiB**，SHA256 `6bd0f223e07a6c6117bd08a752484fba8484aa641efeeaf8320df62c4a8b6ddd`。
+- **短音效**采用独立 WinMM waveOut 播放句段完成／进入新文字区域的短金属声，失败回退到 Windows WAV 文件播放；“试听提示音”将音效分隔播放，另有“试听系统提示音”用来排查设备静音。用户电脑实际出声仍需要真机确认。
+- **修复鼠标离开区域就立刻停止尚未起声语音的竞态**：进入新区域立即朗读/打断旧句；短暂离开区域仅隐藏绿色框，不再取消刚合成的句子。F8、清空、60 秒到期仍立即停止和删除。
+- **广荣 TTS 新增实验性接入**：自动尝试发现用户 NVDA 标准安装目录的 `grtts.dll`，其他安装方式通过“选择已安装的广荣 DLL”按钮选择用户现有文件。底层通过独立子进程调用 `YongDe_*`，支持声音列表、语速/音量、停止和同步 PCM／流式合成回退；不会附带第三方 DLL、语音包、许可证，也不会修改微软许可。**保益悦听具体 DLL 兼容性、云希/晓晓的实际声音输出尚未在用户机上验证**，如果选择不到则保持 SAPI/WinRT 备用。
+- WinRT 语音改为把合成流保留至 MediaEnded，加入播放失败回调与音频状态日志，使用默认多媒体输出类别。**接口成功不等于扬声器必定有声**。
+- 保留已验收的保益悦听 UIA 兼容、绿色文字框、F8 手动截屏、60 秒硬过期；**绝不恢复自动画面检测**。
+- [Windows CI 42508035692](https://github.com/vobichngan285-collab/-/actions/runs/42508035692) **success**：17 项单元测试强制全过，实测 Small 与 Medium 混合两档在英文与暗色中文合成游戏菜单有识别结果，冻结 EXE 双档 OCR/Windows 本地语音合成/UIA/绿色框/完整窗口均运行通过。CI 没有安装用户的真实广荣 DLL，无法代替真实游戏和真实扬声器测试。
+- 实机验收建议：先选 Medium 按 F8 看识别行数、耗时和文字框；“试听提示音”检查分离播放；分别试听 SAPI、WinRT；再选择电脑已合法安装的 `grtts.dll`，在语音下拉框中选择“广荣 · ...”试听。出现任何无声/空结果，点击“复制链路日志”发文字，不包含 OCR 原文、截图或音频。
+
+---
+
 # V1.3 Windows 游戏文字助手 · 2026-11-09 修复与诊断版
 
 **下载**：[Windows 11 x64 免安装 ZIP（已通过 Windows CI）](https://github.com/vobichngan285-collab/-/actions/runs/42504162008/artifacts/13627010787)，直接解压运行 `GameTextReader/GameTextReader.exe`。GitHub 下载有一层外部 artifact ZIP，聊天提供的直接文件无需重复解压外层。**用户机器实际游戏、音效、云希/晓晓尚未验收。**

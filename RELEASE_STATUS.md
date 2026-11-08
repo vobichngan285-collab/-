@@ -111,3 +111,26 @@
 - 只交付 `GameTextReader_V1.3_Windows_x64_Portable.zip`，232059188 bytes，SHA256 `8ddd216b4aa012630c2ed8e70776e22700738d5e46ad7a7582b3cbc8fd39b67e`，已在容器校验 ZIP 无损坏、EXE 及四个权重存在。GitHub artifact [13627010787](https://github.com/vobichngan285-collab/-/actions/runs/42504162008/artifacts/13627010787)，保留 30 天。
 - 用户实机尚需逐一验收 **SAPI 试听**、**WinRT 试听**、**两种短音效**、**Small vs Medium F8 实际耗时与行数**；不要提前声称自然语音问题、Medium 游戏屏幕识别问题或硬件出声问题已彻底解决。
 - 保留所有 V1.0/V1.1/V1.2 历史；Android 仓库未触碰。
+
+
+## V1.4 修复版 · 2026-11-09 · 最新真实构建与待验收
+
+**用户直接授权开发并要求先汇总再生成**。根据用户实拍 V1.3 照片：选择第二档 Medium 后界面仍显示“正在识别新画面...”且尚无结果，F8 耗时过长；完成提示音和鼠标移动/进入文字框的短声没有听到；微软云希/晓晓无法选择；保益悦听 UIA 和绿色框已成功出现，不得破坏。用户明确要额外接入沈广荣“广荣微软 TTS”；此前单纯 SAPI/WinRT 路线未解决。
+
+### 本轮准确变更
+1. 第二档不再运行慢速 Medium 文本检测模型；使用**PP-OCRv6 Small DET + Medium REC** 混合路径，Det.limit_type=max，Small 最长边1280／Medium最长边1152，并保持原屏幕坐标映射。Small 档仍为 Small DET+REC。这是优化速度与容错的技术取舍，**不是声称完整 Medium DET 仍在工作**。
+2. prepare_models.py 和构建清单仅保留3个模型（Small DET、Small REC、Medium REC），减少 ZIP 大小，仍完全离线，不在用户电脑下载模型。
+3. 提示音重新生成短机械声，采用独立 Windows waveOut 输出句段完成和文字切换音，与 SAPI/WinRT/广荣朗读分离，失败回退 winsound WAV 文件；新增分次试听和 Windows 标准提示音排障。
+4. 解决“鼠标一离开 OCR 框，刚触发的 WinRT 语音还没出声就被 stop 取消”的链路问题。改为只有新区域发起新朗读才中断旧句；F8/清除/结果过期仍停播。绿色边框和无障碍 UIA 均保留。
+5. WinRT MediaPlayer 改用多媒体音频类别，保留 SpeechSynthesisStream 直到播放结束，增加 MediaFailed 和播放状态诊断。不把“语音合成成功”误报为扬声器已经出声。
+6. 新增可选第三方 **广荣 TTS**：借鉴沈广荣公开 NVDA 驱动使用的 DLL 接口（YongDe_GetVoiceCount/GetVoiceName/SetVoice/TextToAudio/StartStreamSynth 等），通过 Python multiprocessing 子进程隔离 DLL 和 GUI。可从用户已有 NVDA 插件标准目录有限发现，其他 Windows 保益悦听安装方式由用户在无障碍文件选择器选本地 grtts.dll。未内置任何第三方 DLL/微软自然语音模型/许可内容，未绕过许可；不能声称用户原版保益悦听与该 DLL ABI 完全相同；**广荣及云希/晓晓在用户机尚未实际发声验收**。
+7. 原有“复制链路日志”保持，额外记录是否仍有 OCR 运行、声音请求、报错；无 OCR 原文。绝不恢复动画变化监测，只有按 F8 和60秒TTL清空。
+8. 修正 Actions 中**pytest 失败却被下一条 compileall 的成功退出码掩盖**的问题，现 pytest 或 compileall 失败立即终止构建。16/17测试首次有一条旧音效时长上限不符已修订，**最终17项全部通过**。
+
+### 真实测试和明确边界
+- 最终 Windows Actions 成功：https://github.com/vobichngan285-collab/-/actions/runs/42508035692
+- 完整 EXE 运行后，Small/Medium 双档 OCR 识别“CONTINUE GAME / SETTINGS”、“继续游戏 / 游戏设置”均通过；最后一轮 CI 暗底中文图：Small 推理约704ms，Medium 混合模式约1898ms（CI 上存在 CPU 负载波动；前轮 Medium 同类测试约537–635ms）。旧版完整 Medium 检测的一次对应推理超过3200ms，但不可把不同 CI 运行当精密 A/B。真实游戏速度仍需用户电脑验证。
+- CI 成功 17 项单元测试；打包后实际 EXE OCR 双档、SAPI/WinRT合成流、原生边框 UIA 与完整窗口启动、可选 Guangrong 无 DLL 时优雅回退均通过。
+- 发布唯一免安装 ZIP：`GameTextReader_V1.4_Windows_x64_Portable.zip`，194319209 bytes /185.3MiB；SHA256 `6bd0f223e07a6c6117bd08a752484fba8484aa641efeeaf8320df62c4a8b6ddd`；ZIP CRC pass，内含 EXE+3个官方 ONNX 模型、不含 grtts.dll／medium DET。GitHub Artifact https://github.com/vobichngan285-collab/-/actions/runs/42508035692/artifacts/13627842980；2026-12-08 到期。
+- **未验证**：用户电脑真实声卡播放完成音/鼠标音、用户保益悦听已安装广荣 DLL 的独立调用、讲述人专有云希/晓晓可独立合成、真实游戏悬停顺序和性能。不得将 CI 通过冒充这些环节已经修好。
+- 本仓库仅电脑游戏文字助手 `vobichngan285-collab/-`；未触碰 Android `kanzi-assistant`。
