@@ -14,7 +14,7 @@ import traceback
 import tkinter as tk
 from pathlib import Path
 from queue import Empty, Queue
-from tkinter import ttk
+from tkinter import ttk, filedialog
 
 from .core import HoverTracker, OCRLine, hit_test, build_reading_regions
 from .ocr_backend import LocalOCR
@@ -22,12 +22,13 @@ from .win_screen import enable_dpi_awareness, get_cursor, is_key_down, grab_curr
 from .speech import SpeechWorker, enumerate_sapi_voices
 from .voice_info import preferred_voice_index, narrator_package_names, voice_diagnostic
 from .cues import CuePlayer
+from .guangrong_tts import list_guangrong_voices, chosen_dll_path
 
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "GameTextReader"
 CONFIG_PATH = CONFIG_DIR / "settings.json"
 ERROR_LOG = CONFIG_DIR / "last_ocr_error.txt"
 DEFAULTS = {"vk": 0x77, "hotkey_label": "F8", "tier": "small", "voice": "",
-            "rate": 0, "volume": 100, "dwell_ms": 0}
+            "rate": 0, "volume": 100, "dwell_ms": 0, "guangrong_dir": ""}
 MODIFIER_KEYS = {16, 17, 18, 91, 92}
 RESULT_TTL_SECONDS = 60.0
 
@@ -60,9 +61,9 @@ def write_settings(settings: dict) -> None:
 class ReaderApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        root.title("游戏文字助手 V1.3 · 离线")
-        root.geometry("610x650")
-        root.minsize(560, 590)
+        root.title("游戏文字助手 V1.4 · 离线")
+        root.geometry("690x720")
+        root.minsize(610, 650)
         root.protocol("WM_DELETE_WINDOW", self.close)
 
         self.settings = read_settings()
@@ -70,6 +71,8 @@ class ReaderApp:
         self.lines: list[OCRLine] = []
         self.ocr_worker = LocalOCR()
         self.busy = False
+        self.capture_started_at = None
+        self.capture_warned = False
         self.closed = False
         self.capture_id = 0
         self.expires_at = None
@@ -85,6 +88,7 @@ class ReaderApp:
         self.speech = SpeechWorker(
             on_error=lambda e: self.events.put(("tts_error", e)),
             on_event=lambda e: self.events.put(("audio_event", e)))
+        self.speech.set_guangrong_directory(self.settings.get("guangrong_dir", ""))
         self.speech.set_rate(self.settings["rate"])
         self.speech.set_volume(self.settings["volume"])
         self.cues = CuePlayer(
@@ -108,7 +112,7 @@ class ReaderApp:
     def create_widgets(self):
         p = ttk.Frame(self.root, padding=12)
         p.pack(fill="both", expand=True)
-        ttk.Label(p, text="游戏文字助手 V1.3",
+        ttk.Label(p, text="游戏文字助手 V1.4",
                   font=("Microsoft YaHei UI", 16, "bold")).pack(anchor="w")
         ttk.Label(p, text="按 F8 截图识别，鼠标进入文字区域立刻朗读；"
                   "按 F8 更新旧结果，识别结果最多保留 60 秒。",
@@ -128,12 +132,12 @@ class ReaderApp:
                                            variable=self.tier_var, value="small",
                                            command=self.change_model)
         self.small_radio.pack(anchor="w")
-        self.medium_radio = ttk.Radiobutton(models, text="PP-OCRv6 Medium · 识别优先",
+        self.medium_radio = ttk.Radiobutton(models, text="Medium 识别优先 · Small 快速定位 + Medium 文字识别",
                                             variable=self.tier_var, value="medium",
                                             command=self.change_model)
         self.medium_radio.pack(anchor="w")
 
-        voice_frame = ttk.LabelFrame(p, text="本地语音（SAPI / Windows Runtime）", padding=8)
+        voice_frame = ttk.LabelFrame(p, text="本地语音（SAPI / Windows Runtime / 广荣 TTS）", padding=8)
         voice_frame.pack(fill="x", pady=3)
         self.voice_var = tk.StringVar(value="正在扫描本地语音...")
         self.voice_select = ttk.Combobox(voice_frame, textvariable=self.voice_var,
@@ -158,7 +162,17 @@ class ReaderApp:
                                             command=self.copy_voice_report)
         self.voice_diag_button.pack(side="left", padx=5)
 
-        self.voice_note = tk.StringVar(value="讲述人专用云希/晓晓不一定开放给第三方应用。")
+        gr_row = ttk.Frame(voice_frame)
+        gr_row.pack(fill="x", pady=(5, 0))
+        self.grtts_button = ttk.Button(gr_row, text="选择已安装的广荣 DLL",
+                                        command=self.choose_guangrong)
+        self.grtts_button.pack(side="left")
+        self.system_test_button = ttk.Button(gr_row, text="试听系统提示音",
+                                             command=lambda: self.cues.play("system_test"))
+        self.system_test_button.pack(side="left", padx=6)
+        ttk.Label(gr_row, text="不内置第三方 DLL 或自然语音模型。").pack(side="left")
+
+        self.voice_note = tk.StringVar(value="如电脑已安装广荣，点击“选择已安装的广荣 DLL”，选择 grtts.dll 文件。")
         self.voice_note_label = ttk.Label(voice_frame, textvariable=self.voice_note,
                                           wraplength=560)
         self.voice_note_label.pack(anchor="w", pady=(5, 0))
@@ -223,6 +237,9 @@ class ReaderApp:
             for widget, label in (
                 (self.key_button, "设置单键截图快捷键"),
                 (self.voice_select, "选择本地 TTS 声音"),
+                (self.grtts_button, "选择已安装的广荣 TTS DLL 文件"),
+                (self.cue_test_button, "试听本程序提示音"),
+                (self.system_test_button, "试听 Windows 系统提示音"),
                 (self.rate_slider, "语速"),
                 (self.volume_slider, "音量"),
                 (self.output, "当前截图识别的文字"),
@@ -251,10 +268,12 @@ class ReaderApp:
 
     def copy_runtime_log(self):
         info = [
-            "GameTextReader V1.3 | 仅数值与状态，不含截图和识别文字",
+            "GameTextReader V1.4 | 仅数值与状态，不含截图和识别文字",
             f"当前模型：{self.settings['tier']}",
             f"当前识别文字区域：{len(self.lines)}",
+            f"OCR 是否仍在运行：{self.busy}",
             f"当前选择的 TTS ID：{self.settings.get('voice') or '自动'}",
+            f"广荣 DLL 已选择：{bool(chosen_dll_path(self.settings.get('guangrong_dir','')))}",
             "最近 OCR 阶段耗时：" + str(self.last_ocr_metrics),
             "最近事件：",
             *self.runtime_events[-70:],
@@ -262,9 +281,11 @@ class ReaderApp:
         self.copy_text("\n".join(info), "已复制完整链路日志，不包含 OCR 文字。")
 
     def test_cues(self):
-        self.trace("用户主动试听提示音（与 OCR 和 TTS 无关）")
+        self.trace("试听三次：完成声、鼠标区域轻响、系统提示音")
+        self.status("试听：先完成提示音，约半秒后鼠标轻响，再听系统提示音。")
         self.cues.play("complete")
-        self.cues.play("hover")
+        self.root.after(450, lambda: self.cues.play("hover"))
+        self.root.after(900, lambda: self.cues.play("system_test"))
 
     def status(self, message: str):
         self.status_var.set(message)
@@ -308,17 +329,38 @@ class ReaderApp:
 
     def change_model(self):
         self.settings["tier"] = self.tier_var.get()
+        self.trace("切换 OCR 模式为 " + self.settings["tier"])
         self.persist()
         self.prewarm_model(self.settings["tier"])
 
+    def choose_guangrong(self):
+        selected = filedialog.askopenfilename(
+            parent=self.root, title="选择已经合法安装的广荣 grtts.dll",
+            filetypes=[("广荣语音引擎", "grtts.dll"), ("DLL 文件", "*.dll")])
+        if not selected:
+            return
+        file = chosen_dll_path(selected)
+        if file is None:
+            self.status("没有找到 grtts.dll；请选择已经安装的广荣 DLL 文件。")
+            return
+        self.settings["guangrong_dir"] = str(file)
+        self.settings["voice"] = ""
+        self.speech.set_guangrong_directory(str(file))
+        self.persist()
+        self.scan_voices()
+
     def scan_voices(self):
         self.voice_select.configure(state="disabled")
-        self.voice_var.set("正在扫描...")
+        self.voice_var.set("正在扫描系统与广荣语音...")
+        chosen_dir = self.settings.get("guangrong_dir", "")
         def work():
             try:
                 voices = enumerate_sapi_voices()
                 packages = narrator_package_names()
-                self.events.put(("voices", voices, packages))
+                gr_names, gr_error = list_guangrong_voices(chosen_dir)
+                gr_voices = [(f"grtts:{i}", f"广荣 · {name}")
+                             for i, name in enumerate(gr_names)]
+                self.events.put(("voices", voices + gr_voices, packages, gr_error))
             except Exception as exc:
                 self.events.put(("tts_error", str(exc)))
         threading.Thread(target=work, daemon=True, name="VoiceDiscovery").start()
@@ -389,6 +431,8 @@ class ReaderApp:
         self.invalidate("正在识别新画面...")
         capture_id = self.capture_id
         self.busy = True
+        self.capture_started_at = time.monotonic()
+        self.capture_warned = False
         self.read_btn.configure(state="disabled")
         tier = self.settings["tier"]
         self.trace(f"F8 截图触发，模型={tier}")
@@ -419,6 +463,7 @@ class ReaderApp:
                 if kind == "ocr_ok":
                     _, capture_id, lines, timing = event
                     self.busy = False
+                    self.capture_started_at = None
                     self.read_btn.configure(state="normal")
                     if capture_id != self.capture_id:
                         continue
@@ -443,6 +488,7 @@ class ReaderApp:
                 elif kind == "ocr_fail":
                     _, capture_id, detail = event
                     self.busy = False
+                    self.capture_started_at = None
                     self.read_btn.configure(state="normal")
                     if capture_id != self.capture_id:
                         continue
@@ -456,9 +502,14 @@ class ReaderApp:
                     self.status("识别失败。点击“复制失败诊断”查看错误。")
                     self.update_output("识别失败。")
                 elif kind == "voices":
-                    _, voices, packages = event
+                    _, voices, packages, gr_error = event
                     self.voices = voices
-                    self.voice_report = voice_diagnostic(voices, packages)
+                    self.voice_report = (voice_diagnostic(
+                        [(id_, label) for id_, label in voices
+                         if not id_.startswith("grtts:")], packages)
+                        + "\n广荣语音数量：" + str(sum(
+                            1 for id_, _ in voices if id_.startswith("grtts:")))
+                        + "\n广荣状态：" + (gr_error or "已完成 DLL 语音枚举"))
                     names = [name for _, name in voices]
                     self.voice_select.configure(values=names,
                           state="readonly" if names else "disabled")
@@ -469,14 +520,19 @@ class ReaderApp:
                         available = any(n.lower() in label.lower()
                                         for _, label in voices
                                         for n in ("Yunxi", "Xiaoxiao"))
-                        if available:
-                            self.voice_note.set("已找到可调用的云希或晓晓，请点击试听确认。")
+                        if any(id_.startswith("grtts:") for id_, _ in voices):
+                            self.voice_note.set("已识别出广荣语音；可在上方选择并试听。"
+                                                "真实播放要在你的电脑上验证。")
+                        elif gr_error and chosen_dll_path(self.settings.get("guangrong_dir","")):
+                            self.voice_note.set("广荣接口暂不可用：" + gr_error)
+                        elif available:
+                            self.voice_note.set("检测到可选的自然语音，请点击试听确认。")
                         elif packages:
-                            self.voice_note.set("检测到讲述人自然语音包，但 SAPI/WinRT "
-                                                "未开放云希/晓晓。已保留其它本地声音。")
+                            self.voice_note.set("已安装讲述人自然语音，但 SAPI/WinRT 未开放。"
+                                                "可以手动选择广荣 DLL 试用。")
                         else:
-                            self.voice_note.set("当前未发现可通过公开接口调用的云希/晓晓。"
-                                                "点击“复制语音诊断”获取详情。")
+                            self.voice_note.set("普通 Windows 本地语音可选；"
+                                                "云希、晓晓需广荣等兼容引擎。")
                     else:
                         self.voice_var.set("未找到可调用的本地语音")
                 elif kind == "model_ready":
@@ -511,14 +567,22 @@ class ReaderApp:
 
             if self.expires_at is not None and time.monotonic() >= self.expires_at:
                 self.invalidate("本次 OCR 已满 60 秒：文字、坐标和框已全部删除。")
+            if self.busy and self.capture_started_at is not None:
+                elapsed = time.monotonic() - self.capture_started_at
+                if elapsed >= 7.0 and not self.capture_warned:
+                    self.capture_warned = True
+                    self.trace(f"OCR 运行已超过 {elapsed:.1f} 秒：仍在等待结果")
+                    self.status("OCR 推理时间较长（超过 7 秒），仍在处理；"
+                                "不会无声丢弃结果。可待完成后查看链路日志。")
             if not self.busy and self.lines:
                 x, y = get_cursor()
                 target = hit_test(self.lines, x, y)
                 if target != self.last_target:
                     if self.overlay is not None:
                         self.overlay.show(target)
-                    if target is None and self.last_target is not None:
-                        self.speech.stop()
+                    # Do not cancel a still-synthesizing sentence just because
+                    # the pointer briefly left a box. The next target's speak
+                    # command interrupts it. F8/clear/expiry still stop it.
                     self.last_target = target
                 # Zero dwell. The first poll entering the region speaks once.
                 to_read = self.hover.update(target, time.monotonic() * 1000)
