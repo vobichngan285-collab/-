@@ -1,0 +1,73 @@
+name: Build Windows game text reader
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'game-text-reader-*']
+    paths:
+      - 'game_reader/**'
+      - 'main.py'
+      - 'prepare_models.py'
+      - 'requirements-win.txt'
+      - 'installer/**'
+      - '.github/workflows/build-windows.yml'
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: 'x64'
+          cache: pip
+      - name: Install pinned PaddleOCR runtime and packager
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-win.txt
+          python -m pip install pyinstaller==6.16.0 pytest
+          python -c "import paddle; print('paddle',paddle.__version__); import paddleocr; print('paddleocr',paddleocr.__version__)"
+      - name: Run pure logic tests
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = (Get-Location).Path
+          python -m pytest -q tests
+          python -m compileall -q main.py game_reader
+      - name: Download official Small and Medium models during CI
+        shell: pwsh
+        run: |
+          $env:PADDLE_PDX_MODEL_SOURCE = 'bos'
+          python prepare_models.py
+      - name: Build fully offline portable EXE directory
+        shell: pwsh
+        run: |
+          pyinstaller --clean --noconfirm --onedir --windowed --name GameTextReader --collect-all paddleocr --collect-all paddlex --collect-all paddle --collect-all win32com --add-data 'models;models' main.py
+          if (-not (Test-Path dist/GameTextReader/GameTextReader.exe)) { throw 'EXE missing' }
+      - name: Check presence of bundled models
+        shell: pwsh
+        run: |
+          $names = @('PP-OCRv6_small_det', 'PP-OCRv6_small_rec', 'PP-OCRv6_medium_det', 'PP-OCRv6_medium_rec')
+          foreach ($name in $names) {
+            if (-not (Test-Path "dist/GameTextReader/_internal/models/$name/inference.yml")) { throw "Bundled model missing: $name" }
+          }
+      - name: Make portable archive
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_1.0_Windows_x64_Portable.zip -CompressionLevel Optimal -Force
+      - name: Build Windows setup EXE with Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { throw 'Inno Setup compiler missing' }
+          & $iscc installer/GameTextReader.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC exit code $LASTEXITCODE" }
+      - name: Upload installer and portable archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameTextReader-v1-Windows-x64
+          path: release/*
+          if-no-files-found: error
+          retention-days: 30
