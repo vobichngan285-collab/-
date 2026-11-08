@@ -1,4 +1,4 @@
-"""Prepare both official PP-OCRv6 tiers with RapidOCR ONNX on the Windows CI runner.
+"""Prepare official PP-OCRv6 Small DET + Small/Medium REC on Windows CI.
 
 Weights are downloaded only on CI and copied to models/. Runtime paths are
 strictly local, and the distributed application must work without networking.
@@ -28,7 +28,9 @@ for tier in ("small", "medium"):
         "Rec.engine_type": EngineType.ONNXRUNTIME,
         "Det.ocr_version": OCRVersion.PPOCRV6,
         "Rec.ocr_version": OCRVersion.PPOCRV6,
-        "Det.model_type": (ModelType.SMALL if tier == "small" else ModelType.MEDIUM),
+        "Det.model_type": ModelType.SMALL,
+        "Det.limit_type": "max",
+        "Det.limit_side_len": 1280 if tier == "small" else 1152,
         "Rec.model_type": (ModelType.SMALL if tier == "small" else ModelType.MEDIUM),
     })
     result = engine(image, use_cls=False)
@@ -37,7 +39,8 @@ for tier in ("small", "medium"):
     if not any("GAME" in t.upper() or "SETTINGS" in t.upper() for t in found):
         raise RuntimeError(f"{tier}: unable to OCR a clean test image")
     del engine
-    for phase in ("det", "rec"):
+    # Both run modes use Small DET; only the recognizer changes.
+    for phase in (("det", "rec") if tier == "small" else ("rec",)):
         name = f"PP-OCRv6_{phase}_{tier}.onnx"
         source = PACKAGE_MODELS / name
         if not source.is_file() or source.stat().st_size < 100000:
@@ -45,4 +48,4 @@ for tier in ("small", "medium"):
         copy2(source, DEST / name)
         print(f"[models] bundled {name}: {(DEST/name).stat().st_size}", flush=True)
 
-print("[models] Four real PP-OCRv6 ONNX models ready", flush=True)
+print("[models] Three real PP-OCRv6 models ready (Small DET, Small REC, Medium REC)", flush=True)
