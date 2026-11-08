@@ -18,9 +18,10 @@ def enumerate_winrt_voices() -> list[tuple[str, str]]:
 
 
 class WinRTSpeechWorker:
-    def __init__(self, on_error=None):
+    def __init__(self, on_error=None, on_event=None):
         self._q = Queue()
         self._on_error = on_error
+        self._on_event = on_event
         self._thread = Thread(target=self._run, daemon=True, name="LocalWinRTSpeech")
         self._thread.start()
 
@@ -61,6 +62,8 @@ class WinRTSpeechWorker:
                     return
                 player.source = MediaSource.create_from_stream(stream, stream.content_type)
                 player.play()
+                if self._on_event:
+                    self._on_event(f"WinRT 已合成并向播放器提交 {len(text)} 字（不证明扬声器已出声）")
             except asyncio.CancelledError:
                 pass
             except Exception as exc:

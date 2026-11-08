@@ -29,9 +29,10 @@ def enumerate_sapi_voices() -> list[tuple[str, str]]:
 
 
 class SpeechWorker:
-    def __init__(self, on_error=None):
+    def __init__(self, on_error=None, on_event=None):
         self._commands = Queue()
         self._on_error = on_error
+        self._on_event = on_event
         self._winrt = None  # create WinRT media player only if WinRT voice is selected
         self._rate = 0
         self._volume = 100
@@ -68,10 +69,12 @@ class SpeechWorker:
                         if arg.startswith("winrt:"):
                             self._mode = "winrt"
                             if self._winrt is None:
-                                self._winrt = WinRTSpeechWorker(on_error=self._on_error)
+                                self._winrt = WinRTSpeechWorker(on_error=self._on_error, on_event=self._on_event)
                                 self._winrt.send("rate", str(self._rate))
                                 self._winrt.send("volume", str(self._volume))
                             self._winrt.send("voice", arg[len("winrt:"):])
+                            if self._on_event:
+                                self._on_event("已选择 Windows Runtime 音色")
                         else:
                             self._mode = "sapi"
                             items = voice.GetVoices()
@@ -79,6 +82,8 @@ class SpeechWorker:
                                 item = items.Item(i)
                                 if item.Id == arg:
                                     voice.Voice = item
+                                    if self._on_event:
+                                        self._on_event('已选择 SAPI 音色：' + item.GetDescription())
                                     break
                     elif command == "rate" and arg is not None:
                         voice.Rate = max(-10, min(10, int(arg)))
@@ -96,6 +101,8 @@ class SpeechWorker:
                                 self._winrt.send("speak", arg)
                         else:
                             voice.Speak(arg, 3)
+                            if self._on_event:
+                                self._on_event(f"SAPI 已提交异步朗读请求：{len(arg)} 字（不证明已出声）")
                 except Exception as exc:
                     if self._on_error:
                         self._on_error(str(exc))
