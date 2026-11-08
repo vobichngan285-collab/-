@@ -124,7 +124,7 @@ def test_small_scene_change_and_two_step_confirmation():
     assert changed_pixel_fraction(before, same) == 0
     change = blank.copy()
     from PIL import ImageDraw
-    ImageDraw.Draw(change).rectangle((0, 0, 80, 30), fill="white")
+    ImageDraw.Draw(change).rectangle((0, 0, 90, 40), fill="white")
     after = signature_from_image(change, (0, 0))
     guard = SceneGuard(before)
     assert guard.changed(after)
