@@ -63,7 +63,8 @@ class SpeechWorker:
                             self._winrt.send("stop")
                     elif command == "voice" and arg:
                         voice.Speak("", 3)
-                        self._winrt.send("stop")
+                        if self._winrt is not None:
+                            self._winrt.send("stop")
                         if arg.startswith("winrt:"):
                             self._mode = "winrt"
                             if self._winrt is None:
