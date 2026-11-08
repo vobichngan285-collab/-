@@ -25,6 +25,21 @@ if sys.platform=="win32":
     os.add_dll_directory(str(dll.parent))
     os.chdir(dll.parent)
     try:
+        try:
+            import pefile
+            pe=pefile.PE(str(dll))
+            print("X64_MACHINE",hex(pe.FILE_HEADER.Machine),flush=True)
+            for entry in getattr(pe,"DIRECTORY_ENTRY_IMPORT",[]):
+                print("X64_IMPORT",entry.dll.decode(errors="replace"),flush=True)
+        except Exception as ex:
+            print("PE_IMPORT_ERROR",str(ex),flush=True)
+        for adj in dll.parent.glob("*.dll"):
+            if adj.name.lower() in ("msc_x64.dll","speechsdkshim.dll","microsoft.cognitiveservices.speech.core.dll"):
+                try:
+                    ctypes.WinDLL(str(adj))
+                    print("SUPPORT_LIBRARY_LOADED",adj.name,flush=True)
+                except Exception as ex:
+                    print("SUPPORT_LIBRARY_ERROR",adj.name,type(ex).__name__,str(ex),flush=True)
         lib=ctypes.CDLL(str(dll))
         lib.YongDe_Initialize.argtypes=[]
         lib.YongDe_Initialize.restype=ctypes.c_bool
