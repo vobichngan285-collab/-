@@ -23,6 +23,7 @@ from .speech import SpeechWorker, enumerate_sapi_voices
 from .voice_info import preferred_voice_index, narrator_package_names, voice_diagnostic
 from .cues import CuePlayer
 from .guangrong_tts import list_guangrong_voices, chosen_dll_path, find_known_installed_guangrong
+from .guangrong_setup import install_official_guangrong, installed_x64_dll
 
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "GameTextReader"
 CONFIG_PATH = CONFIG_DIR / "settings.json"
@@ -61,13 +62,16 @@ def write_settings(settings: dict) -> None:
 class ReaderApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        root.title("游戏文字助手 V1.4 · 离线")
+        root.title("游戏文字助手 V1.5 · 独立语音实验")
         root.geometry("690x720")
         root.minsize(610, 650)
         root.protocol("WM_DELETE_WINDOW", self.close)
 
         self.settings = read_settings()
-        if not self.settings.get("guangrong_dir"):
+        local_dll = installed_x64_dll()
+        if local_dll:
+            self.settings["guangrong_dir"] = str(local_dll)
+        elif not self.settings.get("guangrong_dir"):
             found = find_known_installed_guangrong()
             if found:
                 self.settings["guangrong_dir"] = found
@@ -116,7 +120,7 @@ class ReaderApp:
     def create_widgets(self):
         p = ttk.Frame(self.root, padding=12)
         p.pack(fill="both", expand=True)
-        ttk.Label(p, text="游戏文字助手 V1.4",
+        ttk.Label(p, text="游戏文字助手 V1.5 · 独立广荣语音实验",
                   font=("Microsoft YaHei UI", 16, "bold")).pack(anchor="w")
         ttk.Label(p, text="按 F8 截图识别，鼠标进入文字区域立刻朗读；"
                   "按 F8 更新旧结果，识别结果最多保留 60 秒。",
@@ -141,7 +145,7 @@ class ReaderApp:
                                             command=self.change_model)
         self.medium_radio.pack(anchor="w")
 
-        voice_frame = ttk.LabelFrame(p, text="本地语音（SAPI / Windows Runtime / 广荣 TTS）", padding=8)
+        voice_frame = ttk.LabelFrame(p, text="独立本地朗读（广荣 TTS / Windows 语音）", padding=8)
         voice_frame.pack(fill="x", pady=3)
         self.voice_var = tk.StringVar(value="正在扫描本地语音...")
         self.voice_select = ttk.Combobox(voice_frame, textvariable=self.voice_var,
@@ -168,15 +172,15 @@ class ReaderApp:
 
         gr_row = ttk.Frame(voice_frame)
         gr_row.pack(fill="x", pady=(5, 0))
-        self.grtts_button = ttk.Button(gr_row, text="选择已安装的广荣 DLL",
-                                        command=self.choose_guangrong)
+        self.grtts_button = ttk.Button(gr_row, text="一键准备独立广荣 TTS（首次需要联网）",
+                                        command=self.install_guangrong)
         self.grtts_button.pack(side="left")
         self.system_test_button = ttk.Button(gr_row, text="试听系统提示音",
                                              command=lambda: self.cues.play("system_test"))
         self.system_test_button.pack(side="left", padx=6)
-        ttk.Label(gr_row, text="不内置第三方 DLL 或自然语音模型。").pack(side="left")
+        ttk.Label(gr_row, text="单独安装到本软件目录，不使用保益通道。").pack(side="left")
 
-        self.voice_note = tk.StringVar(value="如电脑已安装广荣，点击“选择已安装的广荣 DLL”，选择 grtts.dll 文件。")
+        self.voice_note = tk.StringVar(value="初次点击“一键准备独立广荣”，不需要找 DLL；自然语音包不随基础插件提供。")
         self.voice_note_label = ttk.Label(voice_frame, textvariable=self.voice_note,
                                           wraplength=560)
         self.voice_note_label.pack(anchor="w", pady=(5, 0))
@@ -241,7 +245,7 @@ class ReaderApp:
             for widget, label in (
                 (self.key_button, "设置单键截图快捷键"),
                 (self.voice_select, "选择本地 TTS 声音"),
-                (self.grtts_button, "选择已安装的广荣 TTS DLL 文件"),
+                (self.grtts_button, "下载并安装广荣官方组件到游戏文字助手的独立目录"),
                 (self.cue_test_button, "试听本程序提示音"),
                 (self.system_test_button, "试听 Windows 系统提示音"),
                 (self.rate_slider, "语速"),
@@ -272,9 +276,10 @@ class ReaderApp:
 
     def copy_runtime_log(self):
         info = [
-            "GameTextReader V1.4 | 仅数值与状态，不含截图和识别文字",
+            "GameTextReader V1.5 | 仅数值与状态，不含截图和识别文字",
             f"当前模型：{self.settings['tier']}",
             f"当前识别文字区域：{len(self.lines)}",
+            f"广荣独立组件已准备：{bool(installed_x64_dll())}",
             f"OCR 是否仍在运行：{self.busy}",
             f"当前选择的 TTS ID：{self.settings.get('voice') or '自动'}",
             f"广荣 DLL 已选择：{bool(chosen_dll_path(self.settings.get('guangrong_dir','')))}",
@@ -285,11 +290,9 @@ class ReaderApp:
         self.copy_text("\n".join(info), "已复制完整链路日志，不包含 OCR 文字。")
 
     def test_cues(self):
-        self.trace("试听三次：完成声、鼠标区域轻响、系统提示音")
-        self.status("试听：先完成提示音，约半秒后鼠标轻响，再听系统提示音。")
+        self.trace("试听 F8 识别完成的单次清脆叮声")
+        self.status("试听：单次识别完成提示音“叮”；鼠标移到文字时不再播放音效。")
         self.cues.play("complete")
-        self.root.after(450, lambda: self.cues.play("hover"))
-        self.root.after(900, lambda: self.cues.play("system_test"))
 
     def status(self, message: str):
         self.status_var.set(message)
@@ -336,6 +339,20 @@ class ReaderApp:
         self.trace("切换 OCR 模式为 " + self.settings["tier"])
         self.persist()
         self.prewarm_model(self.settings["tier"])
+
+    def install_guangrong(self):
+        """Only explicit click starts a one-time download; never block Tk."""
+        self.grtts_button.configure(state="disabled")
+        self.status("正在从广荣作者官方发行页获取独立运行组件...")
+        self.trace("用户同意一键准备独立广荣官方组件")
+        def work():
+            try:
+                file = install_official_guangrong(
+                    progress=lambda msg: self.events.put(("gr_install_progress", msg)))
+                self.events.put(("gr_install_done", file))
+            except Exception as exc:
+                self.events.put(("gr_install_fail", type(exc).__name__ + ": " + str(exc)[:260]))
+        threading.Thread(target=work, name="OfficialGuangrongSetup", daemon=True).start()
 
     def choose_guangrong(self):
         selected = filedialog.askopenfilename(
@@ -528,7 +545,7 @@ class ReaderApp:
                             self.voice_note.set("已识别出广荣语音；可在上方选择并试听。"
                                                 "真实播放要在你的电脑上验证。")
                         elif gr_error and chosen_dll_path(self.settings.get("guangrong_dir","")):
-                            self.voice_note.set("广荣接口暂不可用：" + gr_error)
+                            self.voice_note.set("广荣独立接口当前无法初始化：" + gr_error)
                         elif available:
                             self.voice_note.set("检测到可选的自然语音，请点击试听确认。")
                         elif packages:
@@ -539,6 +556,22 @@ class ReaderApp:
                                                 "云希、晓晓需广荣等兼容引擎。")
                     else:
                         self.voice_var.set("未找到可调用的本地语音")
+                elif kind == "gr_install_progress":
+                    self.status(str(event[1]))
+                elif kind == "gr_install_fail":
+                    self.grtts_button.configure(state="normal")
+                    self.trace("广荣组件安装失败：" + str(event[1]))
+                    self.status("独立广荣安装失败，仍可使用 Windows 本地语音。"
+                                "详见“复制链路日志”。")
+                elif kind == "gr_install_done":
+                    self.grtts_button.configure(state="normal")
+                    self.settings["guangrong_dir"] = event[1]
+                    self.settings["voice"] = "grtts:0"
+                    self.speech.set_guangrong_directory(event[1])
+                    self.persist()
+                    self.trace("独立广荣官方组件下载及校验成功；开始检测 64 位 DLL")
+                    self.status("广荣官方组件已准备，正在检查能否独立合成语音...")
+                    self.scan_voices()
                 elif kind == "model_ready":
                     self.trace(f"{event[1]} 模型后台预热完成，耗时 {event[2]}ms")
                 elif kind == "model_warm_error":
@@ -592,7 +625,6 @@ class ReaderApp:
                 to_read = self.hover.update(target, time.monotonic() * 1000)
                 if to_read is not None:
                     self.trace(f"鼠标命中文字；向 TTS 提交 {len(to_read.text)} 字")
-                    self.cues.play("hover")
                     self.speech.speak(to_read.text)
         except Exception as exc:
             self.status("鼠标 / 边框监听异常：" + str(exc))
