@@ -17,31 +17,36 @@ import wave
 from queue import Queue, Full
 
 def make_click_wave(kind: str) -> bytes:
+    """Original bright 'ding' for F8 completion; old hover is legacy/test only."""
     if kind not in ("complete", "hover"):
         raise ValueError("Unknown cue")
-    sr = 24000
-    dur = 0.125 if kind == "complete" else 0.085
-    main = 1220 if kind == "complete" else 950
-    amplitude = .34 if kind == "complete" else .23
-    decay = 25 if kind == "complete" else 54
-    rng = random.Random(17 if kind == "complete" else 32)
-    samples = bytearray()
-    for i in range(round(sr * dur)):
-        t = i / sr
-        initial = .22 * (rng.random() * 2 - 1) * math.exp(-t * 100)
-        ring = (math.sin(2 * math.pi * main * t) +
-                .25 * math.sin(2 * math.pi * main * 2.33 * t))
-        envelope = min(1.0, t * 460) * math.exp(-t * decay)
-        v = max(-.98, min(.98, amplitude * (ring * envelope + initial)))
-        samples += int(v * 32767).to_bytes(2, "little", signed=True)
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as out:
-        out.setnchannels(1)
-        out.setsampwidth(2)
-        out.setframerate(sr)
-        out.writeframes(samples)
-    return buf.getvalue()
-
+    rate = 24000
+    duration = .235 if kind == "complete" else .085
+    sound = bytearray()
+    for i in range(int(rate * duration)):
+        t = i / rate
+        if kind == "complete":
+            # A single bright bell with a fast, smooth attack and soft decay.
+            attack = min(1.0, t * 800)
+            envelope = attack * math.exp(-16.5 * t)
+            partials = (
+                math.sin(2 * math.pi * 1568 * t)
+                + .25 * math.sin(2 * math.pi * 2376 * t)
+                + .09 * math.sin(2 * math.pi * 3220 * t)
+            )
+            value = .34 * partials * envelope
+        else:
+            # Kept to avoid breaking old tests; never triggered on hover in V1.5.
+            value = .18 * math.sin(2 * math.pi * 950 * t) * math.exp(-55 * t)
+        clipped = max(-.95, min(.95, value))
+        sound += int(clipped * 32767).to_bytes(2, "little", signed=True)
+    output = io.BytesIO()
+    with wave.open(output, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(sound)
+    return output.getvalue()
 
 def cue_directory() -> Path:
     return Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "GameTextReader" / "cues"
@@ -132,7 +137,7 @@ class CuePlayer:
             directory.mkdir(parents=True, exist_ok=True)
             for kind in ("complete", "hover"):
                 data = make_click_wave(kind)
-                path = directory / (kind + "_v14.wav")
+                path = directory / (kind + "_v15.wav")
                 if not path.exists() or path.stat().st_size != len(data):
                     path.write_bytes(data)
                 self._paths[kind] = path
