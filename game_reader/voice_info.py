@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 
-NATURAL_NAMES = ("Yunxi", "Xiaoxiao", "云希", "晓晓")
+NATURAL_NAMES = ("Yunxi", "Xiaoxiao", "云希", "云溪", "云曦", "云熙", "晓晓")
 
 
 def preferred_voice_index(voices: list[tuple[str, str]],
