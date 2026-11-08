@@ -282,10 +282,15 @@ class ReaderApp:
                         f"{i+1:03d}  {line.text}    [{line.left},{line.top}]-[{line.right},{line.bottom}]"
                         for i, line in enumerate(lines)))
                     self.status(f"识别完成：{len(lines)} 行，{ms} 毫秒。鼠标指向文字即可朗读；菜单变化请再截图。")
+                    if not lines:
+                        self.speech.speak("未识别到清晰文字。")
+                    else:
+                        self.speech.speak(f"识别完成，共{len(lines)}行。")
                 elif event[0] == "ocr_fail":
                     self.busy = False
                     self.read_btn.configure(state="normal")
                     self.status("识别失败：" + event[1])
+                    self.speech.speak("识别失败。")
                 elif event[0] == "voices":
                     self.voices = event[1]
                     names = [name for _, name in self.voices]
