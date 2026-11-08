@@ -1,0 +1,36 @@
+name: Split verified Windows V1 build downloads
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/repackage.yml']
+permissions:
+  actions: read
+  contents: read
+jobs:
+  repackage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download the already successful Windows build artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 42489455957 --repo "$GITHUB_REPOSITORY" -n GameTextReader-v1-Windows-x64 -D release
+          test -s release/GameTextReader_1.0_Windows_x64_Setup.exe
+          test -s release/GameTextReader_1.0_Windows_x64_Portable.zip
+          ls -lh release
+      - name: Publish installer alone
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameTextReader-V1-Setup-EXE
+          path: release/GameTextReader_1.0_Windows_x64_Setup.exe
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish portable version alone
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameTextReader-V1-Portable-ZIP
+          path: release/GameTextReader_1.0_Windows_x64_Portable.zip
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 30
