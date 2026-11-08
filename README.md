@@ -1,3 +1,16 @@
+
+
+## 2026-11-08 · V1.1 免安装轻量版（当前）
+
+**请优先下载 V1.1，不要继续用旧 V1.0 排查 OCR。** 这次把过大的 PaddlePaddle/PaddleX 推理栈替换为 RapidOCR + ONNX Runtime，保留百度飞桨 PP-OCRv6 Small/Medium 双档，重复权重已删除。只发布 ZIP 绿色版。
+
+- [Windows V1.1 成功构建及下载](https://github.com/vobichngan285-collab/-/actions/runs/42494853633/artifacts/13622743874)（GitHub 产物含一层包装 ZIP，下载后解开即得到绿色版 ZIP）
+- 原始绿色版 ZIP 大小：231816213 bytes，约 221 MiB；SHA256 `55d3ec8989012ef9f57b32b4f9c918ae59a83c4325491e8a6dd151505b51426e`。
+- CI 已实际运行 Windows EXE，Small/Medium 两档 OCR 均通过；SAPI 与 WinRT 本地语音枚举及打包测试通过。
+- **尚未真实验证用户机器上的云希/晓晓**。WinRT 只能调用系统开放的本地语音；用户 Windows 11 讲述人音色不保证开放给普通应用；不注入许可证或修改系统保护。
+- 先退出旧 V1.0，再解压运行 `GameTextReader/GameTextReader.exe`，无需安装 Python。配置仍保存在 `%LOCALAPPDATA%/GameTextReader/settings.json`。
+- 详细实测和修复记录见 `RELEASE_STATUS.md`。旧 V1.0 历史保留。
+
 # 游戏文字助手 V1.0 — Windows 11 独立版
 
 **状态：Windows 安装包和便携版已成功构建，等待用户真机验收。**
