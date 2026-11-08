@@ -45,6 +45,19 @@ jobs:
         run: |
           pyinstaller --clean --noconfirm --onedir --windowed --name GameTextReader --collect-data rapidocr --collect-binaries onnxruntime --collect-all winrt --add-data 'models;models' main.py
           if (-not (Test-Path dist/GameTextReader/GameTextReader.exe)) { throw 'EXE missing' }
+      - name: Remove duplicated RapidOCR model weights
+        shell: pwsh
+        run: |
+          # Our app loads explicit files from _internal/models, not rapidocr/models.
+          # --collect-data rapidocr otherwise duplicates all four weights.
+          $extra = 'dist/GameTextReader/_internal/rapidocr/models'
+          foreach ($name in @('PP-OCRv6_det_small.onnx','PP-OCRv6_rec_small.onnx','PP-OCRv6_det_medium.onnx','PP-OCRv6_rec_medium.onnx')) {
+            $duplicate = Join-Path $extra $name
+            if (Test-Path $duplicate) {
+              Remove-Item $duplicate -Force
+              Write-Output "Removed redundant weight: $name"
+            }
+          }
       - name: Verify bundled models
         shell: pwsh
         run: |
