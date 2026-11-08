@@ -1,4 +1,4 @@
-"""Offline PP-OCRv6 ONNX recognition with measurable cold-load and inference stages."""
+"""Offline PP-OCRv6 hybrid OCR with latency-limited Small detection and per-tier recognition."""
 from __future__ import annotations
 import math
 import sys
@@ -9,10 +9,16 @@ from pathlib import Path
 import numpy as np
 from .core import OCRLine
 
+# V1.4: The old full Medium detector caused multi-second F8 stalls.
+# Use the proven Small detector for BOTH tiers, then Medium recognition only
+# for the accuracy-oriented tier. This is a deliberate hybrid, not a full
+# Medium detector disguised under the old label.
 TIERS = {
-    tier: (f"PP-OCRv6_det_{tier}.onnx", f"PP-OCRv6_rec_{tier}.onnx")
-    for tier in ("small", "medium")
+    "small": ("PP-OCRv6_det_small.onnx", "PP-OCRv6_rec_small.onnx"),
+    "medium": ("PP-OCRv6_det_small.onnx", "PP-OCRv6_rec_medium.onnx"),
 }
+DET_LONG_SIDE = {"small": 1280, "medium": 1152}
+
 
 
 def model_root() -> Path:
@@ -76,7 +82,12 @@ class LocalOCR:
             "Rec.engine_type": EngineType.ONNXRUNTIME,
             "Det.ocr_version": OCRVersion.PPOCRV6,
             "Rec.ocr_version": OCRVersion.PPOCRV6,
-            "Det.model_type": (ModelType.SMALL if tier == "small" else ModelType.MEDIUM),
+            "Det.model_type": ModelType.SMALL,
+            # Avoid upscale-by-short-edge ('min') of a wide game screenshot:
+            # cap the detector's LONGEST side at this tier's pixel budget.
+            # RapidOCR maps detected boxes back to input image coordinates.
+            "Det.limit_type": "max",
+            "Det.limit_side_len": DET_LONG_SIDE[tier],
             "Rec.model_type": (ModelType.SMALL if tier == "small" else ModelType.MEDIUM),
             "Det.model_path": str(det),
             "Rec.model_path": str(rec),
@@ -133,6 +144,9 @@ class LocalOCR:
             "raw_lines": len(raw) if raw is not None else 0,
             "accepted_lines": len(lines),
             "engine_stages": str(result_detail) if result_detail is not None else "n/a",
+            "detector": "PP-OCRv6 Small",
+            "recognizer": f"PP-OCRv6 {tier.capitalize()}",
+            "det_max_side": DET_LONG_SIDE[tier],
         }
 
     def recognize(self, image, origin: tuple[int, int], tier: str) -> list[OCRLine]:
