@@ -1,21 +1,50 @@
-"""PaddleOCR 3.7 locally-packaged Small / Medium models; no runtime downloads."""
+"""Lightweight offline ONNX Runtime driver for official PP-OCRv6 Small/Medium.
+
+Uses RapidOCR (PP-OCRv6 detection + recognition), without PaddlePaddle/PaddleX.
+Only explicit, bundled file paths are allowed. No runtime model downloads.
+"""
 from __future__ import annotations
-import os
+import math
 import sys
 from pathlib import Path
 import numpy as np
-from .core import OCRLine, parse_paddle_result
+from .core import OCRLine
 
 TIERS = {
-    "small": ("PP-OCRv6_small_det", "PP-OCRv6_small_rec"),
-    "medium": ("PP-OCRv6_medium_det", "PP-OCRv6_medium_rec"),
+    tier: (f"PP-OCRv6_det_{tier}.onnx", f"PP-OCRv6_rec_{tier}.onnx")
+    for tier in ("small", "medium")
 }
 
 
 def model_root() -> Path:
     if getattr(sys, "frozen", False):
-        return Path(sys._MEIPASS) / "models"  # PyInstaller onedir _internal/models
+        return Path(sys._MEIPASS) / "models"
     return Path(__file__).resolve().parents[1] / "models"
+
+
+def rapid_result_lines(result, origin: tuple[int, int], minimum_score: float = 0.42) -> list[OCRLine]:
+    """Keep original text, map each quadrilateral to physical screen coords."""
+    boxes, texts, scores = result.boxes, result.txts, result.scores
+    if boxes is None or texts is None:
+        return []
+    if len(boxes) != len(texts) or len(boxes) != len(scores):
+        raise ValueError("RapidOCR quadrilaterals/text/score mismatch")
+    x0, y0 = origin
+    output = []
+    for points, raw_text, raw_score in zip(boxes, texts, scores):
+        text = str(raw_text).strip()
+        if not text or float(raw_score) < minimum_score:
+            continue
+        quad = np.asarray(points, dtype=float)
+        if quad.shape != (4, 2) or not np.isfinite(quad).all():
+            continue
+        left, top = int(math.floor(quad[:,0].min())) + x0, int(math.floor(quad[:,1].min())) + y0
+        right, bottom = int(math.ceil(quad[:,0].max())) + x0, int(math.ceil(quad[:,1].max())) + y0
+        if right <= left or bottom <= top:
+            continue
+        output.append(OCRLine(text, left, top, right, bottom, float(raw_score)))
+    output.sort(key=lambda line: (line.top, line.left))
+    return output
 
 
 class LocalOCR:
@@ -25,29 +54,23 @@ class LocalOCR:
 
     def recognize(self, image, origin: tuple[int, int], tier: str) -> list[OCRLine]:
         if tier not in TIERS:
-            raise ValueError("Unrecognized model tier")
+            raise ValueError("Unsupported OCR tier")
         if tier != self.loaded_tier:
-            det, rec = TIERS[tier]
-            root = model_root()
-            det_path, rec_path = root / det, root / rec
-            for path in (det_path, rec_path):
-                if not path.is_dir() or not any(path.iterdir()):
-                    raise FileNotFoundError(f"缺少本地 OCR 模型：{path}. 请使用完整发布包安装。")
-            os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "1"
-            from paddleocr import PaddleOCR
-            self.engine = PaddleOCR(
-                text_detection_model_name=det,
-                text_recognition_model_name=rec,
-                text_detection_model_dir=str(det_path),
-                text_recognition_model_dir=str(rec_path),
-                use_doc_orientation_classify=False,
-                use_doc_unwarping=False,
-                use_textline_orientation=False,
-                device="cpu",
-            )
+            from rapidocr import RapidOCR
+            det, rec = (model_root() / name for name in TIERS[tier])
+            for path in (det, rec):
+                if not path.is_file() or path.stat().st_size < 100000:
+                    raise FileNotFoundError(f"缺少或损坏的离线 OCR 文件：{path}")
+            self.engine = RapidOCR(params={
+                "Det.engine_type": "onnxruntime",
+                "Rec.engine_type": "onnxruntime",
+                "Det.ocr_version": "PP-OCRv6",
+                "Rec.ocr_version": "PP-OCRv6",
+                "Det.model_type": tier,
+                "Rec.model_type": tier,
+                "Det.model_path": str(det),
+                "Rec.model_path": str(rec),
+            })
             self.loaded_tier = tier
-        prediction = self.engine.predict(np.asarray(image.convert("RGB")))
-        lines = []
-        for item in prediction:
-            lines.extend(parse_paddle_result(item, *origin))
-        return lines
+        result = self.engine(np.asarray(image.convert("RGB")), use_cls=False)
+        return rapid_result_lines(result, origin)
