@@ -17,8 +17,8 @@ with zipfile.ZipFile(a) as z:
         name=item.filename.replace("\\","/")
         if name.startswith("/") or ".." in pathlib.PurePosixPath(name).parts:raise RuntimeError("unsafe archive name")
     z.extractall(out)
-paths=list(out.rglob("grtts.dll"))
-print("dll_paths",[str(p.relative_to(out)) for p in paths],flush=True)
+paths=list(out.rglob("grtts_x64.dll"))
+print("x64_dll_paths",[str(p.relative_to(out)) for p in paths],flush=True)
 if not paths:sys.exit(2)
 dll=paths[0]
 if sys.platform=="win32":
@@ -29,7 +29,7 @@ if sys.platform=="win32":
         lib.YongDe_Initialize.argtypes=[]
         lib.YongDe_Initialize.restype=ctypes.c_bool
         ok=bool(lib.YongDe_Initialize())
-        print("INDEPENDENT_INITIALIZATION",ok,flush=True)
+        print("INDEPENDENT_X64_INITIALIZATION",ok,flush=True)
         if ok:
             lib.YongDe_GetVoiceCount.argtypes=[]
             lib.YongDe_GetVoiceCount.restype=ctypes.c_int
@@ -44,5 +44,5 @@ if sys.platform=="win32":
             lib.YongDe_Uninitialize.restype=None
             lib.YongDe_Uninitialize()
     except Exception as e:
-        print("INDEPENDENT_ERROR",type(e).__name__,str(e),flush=True)
+        print("INDEPENDENT_X64_ERROR",type(e).__name__,str(e),flush=True)
         traceback.print_exc()
