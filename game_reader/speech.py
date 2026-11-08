@@ -4,6 +4,7 @@ from queue import Queue, Empty
 from threading import Thread
 import sys
 from .winrt_speech import WinRTSpeechWorker, enumerate_winrt_voices
+from .guangrong_tts import GuangrongBridge
 
 
 def enumerate_sapi_voices() -> list[tuple[str, str]]:
@@ -33,7 +34,9 @@ class SpeechWorker:
         self._commands = Queue()
         self._on_error = on_error
         self._on_event = on_event
-        self._winrt = None  # create WinRT media player only if WinRT voice is selected
+        self._winrt = None  # lazy WinRT player
+        self._guangrong = None  # user-installed external DLL only
+        self._guangrong_dir = ""
         self._rate = 0
         self._volume = 100
         self._mode = "sapi"
@@ -56,17 +59,39 @@ class SpeechWorker:
                     voice.Speak("", 3)
                     if self._winrt is not None:
                         self._winrt.send("exit")
+                    if self._guangrong is not None:
+                        self._guangrong.close()
                     break
                 try:
                     if command == "stop":
                         voice.Speak("", 3)
                         if self._winrt is not None:
                             self._winrt.send("stop")
+                        if self._guangrong is not None:
+                            self._guangrong.stop()
+                    elif command == "guangrong_dir":
+                        # Keep only a path to the user's OWN installed binary.
+                        if self._guangrong is not None:
+                            self._guangrong.close()
+                            self._guangrong = None
+                        self._guangrong_dir = str(arg or "")
                     elif command == "voice" and arg:
                         voice.Speak("", 3)
                         if self._winrt is not None:
                             self._winrt.send("stop")
-                        if arg.startswith("winrt:"):
+                        if self._guangrong is not None:
+                            self._guangrong.stop()
+                        if arg.startswith("grtts:"):
+                            self._mode = "grtts"
+                            if self._guangrong is None:
+                                self._guangrong = GuangrongBridge(
+                                    self._guangrong_dir,
+                                    on_error=self._on_error,
+                                    on_event=self._on_event)
+                                self._guangrong.set_rate(self._rate)
+                                self._guangrong.set_volume(self._volume)
+                            self._guangrong.select(int(arg[len("grtts:"):]))
+                        elif arg.startswith("winrt:"):
                             self._mode = "winrt"
                             if self._winrt is None:
                                 self._winrt = WinRTSpeechWorker(on_error=self._on_error, on_event=self._on_event)
@@ -90,13 +115,23 @@ class SpeechWorker:
                         self._rate = int(arg)
                         if self._winrt is not None:
                             self._winrt.send("rate", arg)
+                        if self._guangrong is not None:
+                            self._guangrong.set_rate(int(arg))
                     elif command == "volume" and arg is not None:
                         voice.Volume = max(0, min(100, int(arg)))
                         self._volume = int(arg)
                         if self._winrt is not None:
                             self._winrt.send("volume", arg)
+                        if self._guangrong is not None:
+                            self._guangrong.set_volume(int(arg))
                     elif command == "speak" and arg:
-                        if self._mode == "winrt":
+                        if self._mode == "grtts":
+                            if self._guangrong is None:
+                                raise RuntimeError("广荣 TTS 尚未完成初始化")
+                            self._guangrong.speak(str(arg))
+                            if self._on_event:
+                                self._on_event(f"广荣已接受 {len(arg)} 字语音请求")
+                        elif self._mode == "winrt":
                             if self._winrt is not None:
                                 self._winrt.send("speak", arg)
                         else:
@@ -121,6 +156,9 @@ class SpeechWorker:
 
     def set_voice(self, voice_id: str):
         self._commands.put(("voice", voice_id))
+
+    def set_guangrong_directory(self, directory: str):
+        self._commands.put(("guangrong_dir", directory))
 
     def set_rate(self, rate: int):
         self._commands.put(("rate", str(rate)))
