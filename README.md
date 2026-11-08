@@ -1,6 +1,6 @@
 # 游戏文字助手 V1.0 — Windows 11 独立版
 
-**状态：源码与构建流程已编写；在 Windows 构建和真实游戏运行前属于待验证版本。**
+**状态：Windows 安装包和便携版已成功构建，等待用户真机验收。**
 
 ## 功能
 
@@ -60,3 +60,13 @@ python main.py
 ## 安全与许可
 
 不修改 Windows 系统 TTS 注册表、语音许可文本、游戏数据或反作弊模块。PaddleOCR 及模型来自 PaddlePaddle 官方、Apache 2.0；分发前附加第三方依赖的许可文件与声明，并检查实际下载的模型许可证。开发工具 PyInstaller 的构建结果仍需审计全部依赖。
+
+
+## Windows V1.0 构建结果 · 2026-11-08
+
+- Windows Actions [42489455957](https://github.com/vobichngan285-collab/-/actions/runs/42489455957) **success**，构建源码 commit `bbe6efa70d8544f510507927defcf45401253d71`。
+- Windows 安装依赖成功、6 项单元测试通过、4 个离线 PaddleOCR 模型已预装；PyInstaller、Inno Setup、上传均通过。
+- 产物拆分 Actions [42490230612](https://github.com/vobichngan285-collab/-/actions/runs/42490230612) **success**。
+- [Windows 安装包下载](https://github.com/vobichngan285-collab/-/actions/runs/42490230612/artifacts/13620224927)；[便携版下载](https://github.com/vobichngan285-collab/-/actions/runs/42490230612/artifacts/13621181984)。GitHub 可能要求登录。
+- 安装版 `GameTextReader_1.0_Windows_x64_Setup.exe`，299,233,680 bytes，SHA256 `5b266f19886c028754903466cfad88bb6113cc20428a68150b8bdbd61bfb038d`。
+- **Windows 11 实际安装、游戏截屏与鼠标位置、TTS 朗读、云希/晓晓仍未经过用户电脑测试。**
