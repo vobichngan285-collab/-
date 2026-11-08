@@ -38,6 +38,30 @@ def chosen_dll_path(value: str) -> Path | None:
     return None
 
 
+def find_known_installed_guangrong() -> str:
+    """Look only in the conventional per-user NVDA add-on directory.
+
+    Does not recursively search system drives or access any voice/license data.
+    Non-NVDA installers can be selected using the accessible file picker.
+    """
+    roaming = os.environ.get("APPDATA")
+    if not roaming:
+        return ""
+    base = Path(roaming) / "nvda" / "addons"
+    if not base.is_dir():
+        return ""
+    try:
+        for folder in sorted(base.iterdir()):
+            if not folder.is_dir():
+                continue
+            candidate = folder / "synthDrivers" / "grtts.dll"
+            if candidate.is_file():
+                return str(candidate)
+    except OSError:
+        pass
+    return ""
+
+
 def _guangrong_worker(pipe, path: str):
     """All native vendor calls stay outside the application's process."""
     dll = None
