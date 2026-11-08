@@ -62,3 +62,29 @@ def test_hover_reenter_same_row_before_other_row_spoken():
     assert tr.update(b, 120) is None
     assert tr.update(a, 140) is None
     assert tr.update(a, 240) == a
+
+def test_rapidocr_screen_offset_and_box_filter():
+    from types import SimpleNamespace
+    import numpy as np
+    from game_reader.ocr_backend import rapid_result_lines
+    result = SimpleNamespace(
+        boxes=np.array([[[12, 20], [88, 20], [88, 42], [12, 42]],
+                        [[10, 50], [100, 50], [100, 70], [10, 70]]]),
+        txts=("Continue", "Noise"),
+        scores=(0.97, 0.1)
+    )
+    rows = rapid_result_lines(result, (-200, 100))
+    assert len(rows) == 1
+    assert rows[0].text == "Continue"
+    assert (rows[0].left, rows[0].top, rows[0].right, rows[0].bottom) == (-188, 120, -112, 142)
+
+
+def test_rapidocr_empty_and_mismatch():
+    from types import SimpleNamespace
+    from game_reader.ocr_backend import rapid_result_lines
+    assert rapid_result_lines(SimpleNamespace(boxes=None, txts=None, scores=None), (0,0)) == []
+    try:
+        rapid_result_lines(SimpleNamespace(boxes=[[[1,1]]], txts=(), scores=()), (0,0))
+        assert False, "Expected mismatch failure"
+    except ValueError:
+        pass
