@@ -37,7 +37,6 @@ def narrator_package_names() -> list[str]:
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         cmd = [
             "powershell.exe", "-NoProfile", "-NonInteractive",
-            "-ExecutionPolicy", "Bypass",
             "-Command",
             "Get-AppxPackage -Name 'MicrosoftWindows.Voice.zh-CN.*' "
             "| Select-Object -ExpandProperty Name"
