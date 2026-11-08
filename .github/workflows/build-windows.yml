@@ -1,19 +1,19 @@
-name: Build Windows game text reader
+name: Build portable Windows game text reader V1.1
 on:
   workflow_dispatch:
   push:
-    branches: [main, 'game-text-reader-*']
+    branches: ['game-text-reader-*']
     paths:
       - 'game_reader/**'
       - 'main.py'
       - 'prepare_models.py'
       - 'requirements-win.txt'
-      - 'installer/**'
+      - 'tests/**'
       - '.github/workflows/build-windows.yml'
 jobs:
-  build:
+  portable:
     runs-on: windows-2025
-    timeout-minutes: 90
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,61 +22,60 @@ jobs:
           architecture: 'x64'
           cache: pip
           cache-dependency-path: requirements-win.txt
-      - name: Install pinned PaddleOCR runtime and packager
+      - name: Install lightweight ONNX and local Windows TTS
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-win.txt
           python -m pip install pyinstaller==6.16.0 pytest
-          python -c "import paddle; print('paddle',paddle.__version__); import paddleocr; print('paddleocr',paddleocr.__version__)"
-      - name: Run pure logic tests
+          python -c "import rapidocr, onnxruntime; print('rapidocr',rapidocr.__file__);print('onnxruntime',onnxruntime.__version__)"
+          python -c "from winrt.windows.media.speechsynthesis import SpeechSynthesizer; from winrt.windows.media.playback import MediaPlayer; print('WinRT speech installed')"
+      - name: Test source syntax and screen coordinate logic
         shell: pwsh
         run: |
           $env:PYTHONPATH = (Get-Location).Path
           python -m pytest -q tests
           python -m compileall -q main.py game_reader
-      - name: Download official Small and Medium models during CI
+      - name: Prepare official PP-OCRv6 Small and Medium ONNX weights
         shell: pwsh
         run: |
-          $env:PADDLE_PDX_MODEL_SOURCE = 'bos'
           python prepare_models.py
-      - name: Build fully offline portable EXE directory
+      - name: Build lean portable EXE folder
         shell: pwsh
         run: |
-          pyinstaller --clean --noconfirm --onedir --windowed --name GameTextReader --collect-all paddleocr --collect-all paddlex --collect-all paddle --collect-all win32com --add-data 'models;models' main.py
+          pyinstaller --clean --noconfirm --onedir --windowed --name GameTextReader --collect-data rapidocr --collect-binaries onnxruntime --collect-all winrt --add-data 'models;models' main.py
           if (-not (Test-Path dist/GameTextReader/GameTextReader.exe)) { throw 'EXE missing' }
-      - name: Run actual frozen Windows EXE with both OCR models
+      - name: Verify bundled models
         shell: pwsh
         run: |
-          & dist/GameTextReader/GameTextReader.exe --self-test-ocr
-          $exitCode = $LASTEXITCODE
-          $log = Join-Path $env:TEMP "GameTextReader_ocr_selftest.txt"
-          if (Test-Path $log) { Get-Content $log }
-          if ($exitCode -ne 0) { throw "Frozen EXE OCR smoke test failed (exit code $exitCode)" }
-      - name: Check presence of bundled models
-        shell: pwsh
-        run: |
-          $names = @('PP-OCRv6_small_det', 'PP-OCRv6_small_rec', 'PP-OCRv6_medium_det', 'PP-OCRv6_medium_rec')
+          $names = @('PP-OCRv6_det_small.onnx','PP-OCRv6_rec_small.onnx','PP-OCRv6_det_medium.onnx','PP-OCRv6_rec_medium.onnx')
           foreach ($name in $names) {
-            if (-not (Test-Path "dist/GameTextReader/_internal/models/$name/inference.yml")) { throw "Bundled model missing: $name" }
+            $file = Join-Path "dist/GameTextReader/_internal/models" $name
+            if (-not (Test-Path $file)) { throw "Missing offline ONNX: $name" }
           }
-      - name: Make portable archive
+      - name: Truly execute frozen EXE and test BOTH OCR tiers
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force release | Out-Null
-          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_1.0_Windows_x64_Portable.zip -CompressionLevel Optimal -Force
-      - name: Build Windows setup EXE with Inno Setup
+          $testLog = Join-Path $env:TEMP 'GameTextReader_ocr_selftest.txt'
+          Remove-Item $testLog -Force -ErrorAction SilentlyContinue
+          $exe = (Resolve-Path 'dist/GameTextReader/GameTextReader.exe').Path
+          $process = Start-Process -FilePath $exe -ArgumentList '--self-test-ocr' -Wait -PassThru
+          if (-not (Test-Path $testLog)) { throw 'Frozen GUI EXE did not create the OCR verification log' }
+          $report = Get-Content $testLog -Raw
+          Write-Output $report
+          if (($process.ExitCode -ne 0) -or (-not $report.StartsWith('PASS'))) {
+            throw "Frozen OCR failed; exit=$($process.ExitCode)"
+          }
+      - name: Assemble ONLY portable ZIP
         shell: pwsh
         run: |
-          choco install innosetup -y --no-progress
-          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
-          if (-not (Test-Path $iscc)) { throw 'Inno Setup compiler missing' }
-          & $iscc installer/GameTextReader.iss
-          if ($LASTEXITCODE -ne 0) { throw "ISCC exit code $LASTEXITCODE" }
-      - name: Upload installer and portable archive
-        uses: actions/upload-artifact@v4
+          New-Item -ItemType Directory release -Force | Out-Null
+          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_V1.1_Windows_x64_Portable.zip -CompressionLevel Optimal -Force
+          $size = (Get-Item release/GameTextReader_V1.1_Windows_x64_Portable.zip).Length
+          Write-Output "Portable archive size: $size bytes"
+      - uses: actions/upload-artifact@v4
         with:
-          name: GameTextReader-v1-Windows-x64
-          path: release/*
+          name: GameTextReader-V1.1-Portable
+          path: release/GameTextReader_V1.1_Windows_x64_Portable.zip
           if-no-files-found: error
           retention-days: 30
