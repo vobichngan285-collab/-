@@ -90,6 +90,33 @@ def _guangrong_worker(pipe, path: str):
             function = getattr(dll, name)
             function.restype = ret
             function.argtypes = args
+        # The upstream Guangrong NVDA driver supports BOTH synchronous PCM
+        # and the streaming synth interface. NaturalVoice may need streaming.
+        streaming = all(hasattr(dll, name) for name in (
+            "YongDe_StartStreamSynth", "YongDe_GetStreamChunk",
+            "YongDe_FreeStreamChunk", "YongDe_IsStreamComplete",
+            "YongDe_StopStreamSynth"))
+        if streaming:
+            api = [
+                ("YongDe_StartStreamSynth", ctypes.c_bool, [ctypes.c_wchar_p]),
+                ("YongDe_GetStreamChunk", ctypes.c_bool,
+                 [ctypes.POINTER(ctypes.c_void_p),
+                  ctypes.POINTER(ctypes.c_int)]),
+                ("YongDe_FreeStreamChunk", None, [ctypes.c_void_p]),
+                ("YongDe_IsStreamComplete", ctypes.c_bool, []),
+                ("YongDe_StopStreamSynth", None, []),
+            ]
+            if hasattr(dll, "YongDe_GetStreamChunkEx"):
+                api.append(("YongDe_GetStreamChunkEx", ctypes.c_bool,
+                            [ctypes.POINTER(ctypes.c_void_p),
+                             ctypes.POINTER(ctypes.c_int),
+                             ctypes.POINTER(ctypes.c_int),
+                             ctypes.POINTER(ctypes.c_int),
+                             ctypes.POINTER(ctypes.c_int)]))
+            for name, ret, args in api:
+                method = getattr(dll, name)
+                method.restype = ret
+                method.argtypes = args
         if not dll.YongDe_Initialize():
             emit("error", "广荣 DLL 初始化失败；可能缺少语音模型或依赖文件。")
             return
@@ -103,6 +130,65 @@ def _guangrong_worker(pipe, path: str):
         if not names:
             emit("error", "广荣 DLL 已加载，但没有可用的声音。请检查原安装目录音库文件。")
 
+        def synthesize_stream(request_id: int, text: str):
+            """Fallback to official Guangrong streaming functions, buffer PCM.
+
+            Streams of different formats are never blindly concatenated.
+            This intentionally does not duplicate NVDA's nvwave dependency.
+            """
+            if not streaming or not dll.YongDe_StartStreamSynth(text):
+                return None
+            frames = bytearray()
+            fmt = None
+            deadline = time.monotonic() + 20.0
+            try:
+                while time.monotonic() < deadline:
+                    with generation_lock:
+                        if request_id != generation[0]:
+                            return None
+                    if dll.YongDe_IsStreamComplete():
+                        break
+                    ptr = ctypes.c_void_p()
+                    length = ctypes.c_int()
+                    sr, bits, channels = ctypes.c_int(), ctypes.c_int(), ctypes.c_int()
+                    if hasattr(dll, "YongDe_GetStreamChunkEx"):
+                        got = dll.YongDe_GetStreamChunkEx(
+                            ctypes.byref(ptr), ctypes.byref(length),
+                            ctypes.byref(sr), ctypes.byref(bits),
+                            ctypes.byref(channels))
+                        if got:
+                            incoming = (sr.value, bits.value, channels.value)
+                            if fmt is None:
+                                fmt = incoming
+                            if fmt != incoming:
+                                raise ValueError("广荣输出音频格式在一句话中发生变化")
+                    else:
+                        got = dll.YongDe_GetStreamChunk(
+                            ctypes.byref(ptr), ctypes.byref(length))
+                    if got and ptr.value and length.value > 0:
+                        try:
+                            if length.value > MAX_AUDIO_BYTES - len(frames):
+                                raise ValueError("广荣输出音频长度超过上限")
+                            frames.extend(ctypes.string_at(ptr.value, length.value))
+                        finally:
+                            dll.YongDe_FreeStreamChunk(ptr)
+                    else:
+                        time.sleep(0.006)
+                if not frames:
+                    return None
+                if fmt is None:
+                    sr, bits, channels = ctypes.c_int(), ctypes.c_int(), ctypes.c_int()
+                    dll.YongDe_GetAudioFormat(ctypes.byref(sr),
+                                              ctypes.byref(bits),
+                                              ctypes.byref(channels))
+                    fmt = (sr.value, bits.value, channels.value)
+                return bytes(frames), fmt
+            finally:
+                try:
+                    dll.YongDe_StopStreamSynth()
+                except Exception:
+                    pass
+
         def synthesize(request_id: int, text: str):
             with synthesizing:
                 with generation_lock:
@@ -115,13 +201,25 @@ def _guangrong_worker(pipe, path: str):
                     ok = dll.YongDe_TextToAudio(text, ctypes.byref(pointer),
                                                 ctypes.byref(size))
                     elapsed = int((time.perf_counter() - start) * 1000)
-                    if not ok or not pointer.value or not 0 < size.value <= MAX_AUDIO_BYTES:
-                        emit("error", "广荣合成没有产生有效 PCM。此 DLL/音库可能不兼容独立调用。")
-                        return
-                    pcm = ctypes.string_at(pointer.value, size.value)
-                    sr, bits, channels = ctypes.c_int(), ctypes.c_int(), ctypes.c_int()
-                    dll.YongDe_GetAudioFormat(ctypes.byref(sr),
-                                              ctypes.byref(bits), ctypes.byref(channels))
+                    if ok and pointer.value and 0 < size.value <= MAX_AUDIO_BYTES:
+                        pcm = ctypes.string_at(pointer.value, size.value)
+                        sr, bits, channels = ctypes.c_int(), ctypes.c_int(), ctypes.c_int()
+                        dll.YongDe_GetAudioFormat(ctypes.byref(sr),
+                                                  ctypes.byref(bits),
+                                                  ctypes.byref(channels))
+                    else:
+                        # Some installed Microsoft NeuralVoices are exposed
+                        # only via the streaming path in the vendor DLL.
+                        fallback = synthesize_stream(request_id, text)
+                        if fallback is None:
+                            emit("error", "广荣同步和流式合成均无有效音频。"
+                                          "请核对原安装音库和 grtts.dll。")
+                            return
+                        pcm, fmt = fallback
+                        sr, bits, channels = (ctypes.c_int(fmt[0]),
+                                              ctypes.c_int(fmt[1]),
+                                              ctypes.c_int(fmt[2]))
+                    elapsed = int((time.perf_counter() - start) * 1000)
                     with generation_lock:
                         if request_id != generation[0]:
                             return
