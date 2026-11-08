@@ -14,7 +14,7 @@ import traceback
 import tkinter as tk
 from pathlib import Path
 from queue import Empty, Queue
-from tkinter import ttk, filedialog
+from tkinter import ttk
 
 from .core import HoverTracker, OCRLine, hit_test, build_reading_regions
 from .ocr_backend import LocalOCR
@@ -22,7 +22,7 @@ from .win_screen import enable_dpi_awareness, get_cursor, is_key_down, grab_curr
 from .speech import SpeechWorker, enumerate_sapi_voices
 from .voice_info import preferred_voice_index, narrator_package_names, voice_diagnostic
 from .cues import CuePlayer
-from .guangrong_tts import list_guangrong_voices, chosen_dll_path, find_known_installed_guangrong
+from .guangrong_tts import list_guangrong_voices, chosen_dll_path
 from .guangrong_setup import install_official_guangrong, installed_x64_dll
 
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "GameTextReader"
@@ -69,12 +69,11 @@ class ReaderApp:
 
         self.settings = read_settings()
         local_dll = installed_x64_dll()
-        if local_dll:
-            self.settings["guangrong_dir"] = str(local_dll)
-        elif not self.settings.get("guangrong_dir"):
-            found = find_known_installed_guangrong()
-            if found:
-                self.settings["guangrong_dir"] = found
+        # Strictly independent engine. Never bind to the user's running
+        # screen reader or its installed engine directory.
+        self.settings["guangrong_dir"] = str(local_dll) if local_dll else ""
+        if not local_dll and self.settings.get("voice", "").startswith("grtts:"):
+            self.settings["voice"] = ""
         self.events: Queue[tuple] = Queue()
         self.lines: list[OCRLine] = []
         self.ocr_worker = LocalOCR()
@@ -353,22 +352,6 @@ class ReaderApp:
             except Exception as exc:
                 self.events.put(("gr_install_fail", type(exc).__name__ + ": " + str(exc)[:260]))
         threading.Thread(target=work, name="OfficialGuangrongSetup", daemon=True).start()
-
-    def choose_guangrong(self):
-        selected = filedialog.askopenfilename(
-            parent=self.root, title="选择已经合法安装的广荣 grtts.dll",
-            filetypes=[("广荣语音引擎", "grtts.dll"), ("DLL 文件", "*.dll")])
-        if not selected:
-            return
-        file = chosen_dll_path(selected)
-        if file is None:
-            self.status("没有找到 grtts.dll；请选择已经安装的广荣 DLL 文件。")
-            return
-        self.settings["guangrong_dir"] = str(file)
-        self.settings["voice"] = ""
-        self.speech.set_guangrong_directory(str(file))
-        self.persist()
-        self.scan_voices()
 
     def scan_voices(self):
         self.voice_select.configure(state="disabled")
