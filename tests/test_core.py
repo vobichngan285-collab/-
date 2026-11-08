@@ -164,3 +164,27 @@ def test_ocr_warmup_not_repeated_for_same_tier(monkeypatch):
     worker.prepare("small")
     worker.prepare("small")
     assert len(calls) == 1
+
+
+def test_v14_hybrid_uses_small_detector_and_medium_recognizer():
+    from game_reader.ocr_backend import TIERS, DET_LONG_SIDE
+    assert TIERS["small"] == ("PP-OCRv6_det_small.onnx", "PP-OCRv6_rec_small.onnx")
+    assert TIERS["medium"] == ("PP-OCRv6_det_small.onnx", "PP-OCRv6_rec_medium.onnx")
+    assert DET_LONG_SIDE["medium"] <= DET_LONG_SIDE["small"]
+
+
+def test_grtts_requires_explicit_existing_vendor_dll(tmp_path):
+    from game_reader.guangrong_tts import chosen_dll_path, list_guangrong_voices
+    assert chosen_dll_path("") is None
+    assert chosen_dll_path(str(tmp_path)) is None
+    voices, error = list_guangrong_voices(str(tmp_path), timeout=.1)
+    assert voices == [] and error
+
+
+def test_grtts_optional_voice_id_and_path(tmp_path):
+    from game_reader.guangrong_tts import chosen_dll_path
+    file = tmp_path / "grtts.dll"
+    file.write_bytes(b"Not a usable DLL; existence test only")
+    assert chosen_dll_path(str(file)) == file.resolve()
+    assert chosen_dll_path(str(tmp_path)) == file.resolve()
+    assert chosen_dll_path(str(tmp_path / "another.dll")) is None
