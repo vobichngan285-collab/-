@@ -1,8 +1,7 @@
 """Windows 11 offline game menu OCR: immediate pointer reading + accessible UI.
 
-The F8 capture is one-shot. Between captures only low-resolution pixels are
-compared; NO continuous OCR, game injection, online service or private voice
-license workaround is used.
+The F8 capture is one-shot. There is NO background screen capture, scene-change classification, continuous
+OCR, game injection, online service, or private voice-license workaround.
 """
 from __future__ import annotations
 
@@ -260,7 +259,7 @@ class ReaderApp:
             "最近事件：",
             *self.runtime_events[-70:],
         ]
-        self.copy_text("\\n".join(info), "已复制完整链路日志，不包含 OCR 文字。")
+        self.copy_text("\n".join(info), "已复制完整链路日志，不包含 OCR 文字。")
 
     def test_cues(self):
         self.trace("用户主动试听提示音（与 OCR 和 TTS 无关）")
@@ -409,7 +408,7 @@ class ReaderApp:
                 self.events.put(("ocr_ok", capture_id, lines, timing))
             except Exception:
                 self.events.put(("ocr_fail", capture_id,
-                                 "phase: " + phase + "\\n" + traceback.format_exc()))
+                                 "phase: " + phase + "\n" + traceback.format_exc()))
         threading.Thread(target=worker, daemon=True, name="OneShotOCR").start()
 
     def poll_messages(self):

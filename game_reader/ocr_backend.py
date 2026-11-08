@@ -91,8 +91,17 @@ class LocalOCR:
         with self._lock:
             self._load(tier)
             if not self._warmed:
-                blank = np.full((128, 256, 3), 255, dtype=np.uint8)
-                self.engine(blank, use_cls=False)
+                # RapidOCR 3.10 lazily loads recognition ONLY when it sees
+                # real text. A blank frame would warm DET but not REC.
+                from PIL import Image, ImageDraw, ImageFont
+                sample = Image.new("RGB", (580, 180), "white")
+                draw = ImageDraw.Draw(sample)
+                try:
+                    font = ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", 54)
+                except OSError:
+                    font = ImageFont.load_default()
+                draw.text((30, 45), "CONTINUE GAME", fill="black", font=font)
+                self.engine(np.asarray(sample), use_cls=False)
                 self._warmed = True
         return _milliseconds(started)
 
