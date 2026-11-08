@@ -88,3 +88,81 @@ def test_rapidocr_empty_and_mismatch():
         assert False, "Expected mismatch failure"
     except ValueError:
         pass
+
+
+def test_immediate_mouse_target_and_no_duplicate():
+    from game_reader.core import HoverTracker
+    x = line("打开菜单", 10, 10, 90, 30)
+    y = line("退出游戏", 10, 50, 90, 70)
+    track = HoverTracker(0)
+    assert track.update(x, 100) == x  # no 150ms wait
+    assert track.update(x, 101) is None
+    assert track.update(y, 120) == y
+    assert track.update(None, 121) is None
+    assert track.update(x, 122) == x
+
+
+def test_conservative_region_grouping_matches_spoken_text():
+    from game_reader.core import build_reading_regions
+    long_line = line("你现在已经到达城市的中央广场", 20, 20, 290, 44)
+    next_line = line("继续向东就能找到任务目标。", 21, 48, 275, 72)
+    menu_a = line("继续游戏", 20, 130, 155, 152)
+    menu_b = line("读取存档", 20, 158, 155, 180)
+    regions = build_reading_regions([menu_b, next_line, menu_a, long_line])
+    assert len(regions) == 3
+    assert "任务目标" in regions[0].text
+    assert (regions[0].left, regions[0].top, regions[0].right, regions[0].bottom) == (20, 20, 290, 72)
+    assert [region.text for region in regions[1:]] == ["继续游戏", "读取存档"]
+
+
+def test_small_scene_change_and_two_step_confirmation():
+    from PIL import Image
+    from game_reader.screen_change import signature_from_image, changed_pixel_fraction, SceneGuard
+    blank = Image.new("RGB", (160, 90), "black")
+    before = signature_from_image(blank, (0, 0))
+    same = signature_from_image(blank.copy(), (0, 0))
+    assert changed_pixel_fraction(before, same) == 0
+    change = blank.copy()
+    from PIL import ImageDraw
+    ImageDraw.Draw(change).rectangle((0, 0, 80, 30), fill="white")
+    after = signature_from_image(change, (0, 0))
+    guard = SceneGuard(before)
+    assert guard.changed(after)
+    assert changed_pixel_fraction(before, after) >= 0.18
+
+
+def test_scene_guard_rejects_small_cursor_and_resets():
+    from PIL import Image, ImageDraw
+    from game_reader.screen_change import signature_from_image, SceneGuard
+    im = Image.new("RGB", (160, 90), "black")
+    baseline = signature_from_image(im, (-400, 100))
+    minor = im.copy()
+    ImageDraw.Draw(minor).rectangle((50, 35, 56, 41), fill="white")
+    assert not SceneGuard(baseline).changed(signature_from_image(minor, (-400, 100)))
+    guard = SceneGuard(baseline)
+    moderate = im.copy()
+    ImageDraw.Draw(moderate).rectangle((10, 10, 70, 30), fill="white")
+    mid = signature_from_image(moderate, (-400, 100))
+    assert not guard.changed(mid)
+    assert guard.changed(mid)
+
+
+def test_voice_fallback_prefers_callable_chinese():
+    from game_reader.voice_info import preferred_voice_index, voice_diagnostic
+    voices = [("eng", "Microsoft Zira"), ("cn", "Microsoft Huihui"),
+              ("winrt:abc", "Windows 语音 · Xiaoxiao (zh-CN)")]
+    assert preferred_voice_index(voices) == 2
+    assert preferred_voice_index(voices, "cn") == 1
+    assert preferred_voice_index(voices, "unavailable") == 2
+    assert "已安装 ≠" in voice_diagnostic(voices, ["MicrosoftWindows.Voice.zh-CN.Yunxi.1"])
+
+
+def test_generated_cues_are_short_mono_pcm():
+    from io import BytesIO
+    import wave
+    from game_reader.cues import make_click_wave
+    for kind in ("hover", "complete"):
+        with wave.open(BytesIO(make_click_wave(kind)), "rb") as wav:
+            assert wav.getnchannels() == 1
+            assert wav.getsampwidth() == 2
+            assert wav.getnframes() < 2000
