@@ -68,22 +68,66 @@ def packaged_ocr_selftest() -> int:
 
 
 def packaged_tts_selftest() -> int:
-    """Check imported speech modules and installed voices without requiring audio."""
+    """Prove a genuine local SAPI voice can synthesize non-empty PCM.
+
+    This test needs no speaker; producing a file is not evidence the user's
+    endpoint will play it. WinRT synthesis is separately reported.
+    """
     import tempfile
     import traceback
+    import asyncio
     from pathlib import Path
     log = Path(tempfile.gettempdir()) / "GameTextReader_tts_selftest.txt"
+    wav = Path(tempfile.gettempdir()) / "GameTextReader_SAPI_probe.wav"
+    report = []
     try:
-        from game_reader.speech import enumerate_sapi_voices, SpeechWorker
+        import pythoncom
+        import win32com.client
+        from game_reader.speech import enumerate_sapi_voices
         from winrt.windows.media.speechsynthesis import SpeechSynthesizer
         from winrt.windows.media.playback import MediaPlayer
         voices = enumerate_sapi_voices()
-        # Not all signed Narrator-only voices are public; this tests the API.
-        log.write_text("PASS\n" + "\n".join(v[1] for v in voices), encoding="utf-8")
+        report.extend(v[1] for v in voices)
+        pythoncom.CoInitialize()
+        try:
+            speaker = win32com.client.Dispatch("SAPI.SpVoice")
+            stream = win32com.client.Dispatch("SAPI.SpFileStream")
+            stream.Open(str(wav), 3, False)  # SSFMCreateForWrite
+            speaker.AudioOutputStream = stream
+            speaker.Speak("Game text reader speech engine test.", 0)
+            stream.Close()
+            size = wav.stat().st_size
+            if size < 2000:
+                raise RuntimeError(f"SAPI produced too few WAV bytes: {size}")
+            report.append(f"SAPI synthesis PASS: {size} PCM WAV bytes")
+        finally:
+            pythoncom.CoUninitialize()
+
+        async def check_winrt_synthesis():
+            synthesizer = SpeechSynthesizer()
+            output = await synthesizer.synthesize_text_to_stream_async(
+                "Speech engine test")
+            return int(output.size)
+
+        try:
+            size = asyncio.run(check_winrt_synthesis())
+            if size < 200:
+                report.append(f"WinRT synthesis INCOMPLETE: {size} stream bytes")
+            else:
+                report.append(f"WinRT synthesis PASS: {size} stream bytes")
+        except Exception as exc:
+            report.append(f"WinRT synthesis NOT VALIDATED: {type(exc).__name__}: {exc}")
+        log.write_text("PASS\n" + "\n".join(report), encoding="utf-8")
         return 0
     except BaseException:
-        log.write_text("FAIL\n" + traceback.format_exc(), encoding="utf-8")
+        log.write_text("FAIL\n" + "\n".join(report) + "\n" +
+                       traceback.format_exc(), encoding="utf-8")
         return 1
+    finally:
+        try:
+            wav.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 
