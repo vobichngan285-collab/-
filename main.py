@@ -38,9 +38,30 @@ def packaged_ocr_selftest() -> int:
         return 1
 
 
+def packaged_tts_selftest() -> int:
+    """Check imported speech modules and installed voices without requiring audio."""
+    import tempfile
+    import traceback
+    from pathlib import Path
+    log = Path(tempfile.gettempdir()) / "GameTextReader_tts_selftest.txt"
+    try:
+        from game_reader.speech import enumerate_sapi_voices, SpeechWorker
+        from winrt.windows.media.speechsynthesis import SpeechSynthesizer
+        from winrt.windows.media.playback import MediaPlayer
+        voices = enumerate_sapi_voices()
+        # Not all signed Narrator-only voices are public; this tests the API.
+        log.write_text("PASS\\n" + "\\n".join(v[1] for v in voices), encoding="utf-8")
+        return 0
+    except BaseException:
+        log.write_text("FAIL\\n" + traceback.format_exc(), encoding="utf-8")
+        return 1
+
+
 if __name__ == "__main__":
     multiprocessing.freeze_support()
     if "--self-test-ocr" in sys.argv:
         raise SystemExit(packaged_ocr_selftest())
+    if "--self-test-tts" in sys.argv:
+        raise SystemExit(packaged_tts_selftest())
     from game_reader.app import run
     run()
