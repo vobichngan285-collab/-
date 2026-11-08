@@ -40,3 +40,17 @@
 - [Windows 安装包下载](https://github.com/vobichngan285-collab/-/actions/runs/42490230612/artifacts/13620224927)；[便携版下载](https://github.com/vobichngan285-collab/-/actions/runs/42490230612/artifacts/13621181984)。GitHub 可能要求登录。
 - 安装版 `GameTextReader_1.0_Windows_x64_Setup.exe`，299,233,680 bytes，SHA256 `5b266f19886c028754903466cfad88bb6113cc20428a68150b8bdbd61bfb038d`。
 - **Windows 11 实际安装、游戏截屏与鼠标位置、TTS 朗读、云希/晓晓仍未经过用户电脑测试。**
+
+
+## V1.1 免安装版 · 2026-11-08（接续记录，不覆盖 V1.0）
+
+- **用户实测 V1.0 的问题**：Windows 11 上未显示云希/晓晓自然语音；点击截图 OCR 报“识别失败”，但当时缺少具体错误堆栈。
+- **主要技术调整**：不再打包 PaddlePaddle/PaddleX，改用官方 PP-OCRv6 Small / Medium 双档 ONNX 权重 + RapidOCR 3.10.0 + ONNX Runtime；维持离线、原始文字坐标及鼠标指向朗读。
+- **TTS 调整**：兼容 SAPI 语音，同时尝试系统公开的 Windows Runtime 语音枚举、播放；未注入微软许可证、不破解系统保护。讲述人专用云希/晓晓是否对第三方暴露，**尚未在用户电脑验证**；SAPI 语音继续作为备用。
+- **诊断**：OCR 失败记录阶段、异常类和堆栈到 LOCALAPPDATA/GameTextReader/last_ocr_error.txt，界面有“复制失败诊断”，不会记录截图或 OCR 文字。
+- **体积优化**：PyInstaller 两套模型重复收集到 rapidocr/models 与独立 models，已在构建时删掉四个重复权重，再跑实际 EXE OCR 自测以确保不是误删。
+- **仅交付绿色版**：不再生成安装程序。Windows Actions 成功任务 https://github.com/vobichngan285-collab/-/actions/runs/42494853633 ，构建源码 commit `114b33680bf7f5f3e6ca1471810e897c2fa959a6`。
+- **真实 Windows CI 验证**：8 项基础测试、Small/Medium 模型初始化、PyInstaller Windows EXE 运行 OCR 双档实际推理、打包 WinRT/SAPI 声音枚举测试、四个本地权重存在性、ZIP 上传均成功。
+- **交付文件**：GameTextReader_V1.1_Windows_x64_Portable.zip ，231816213 bytes（约 221 MiB）；SHA256: `55d3ec8989012ef9f57b32b4f9c918ae59a83c4325491e8a6dd151505b51426e`。
+- **GitHub Artifact**：https://github.com/vobichngan285-collab/-/actions/runs/42494853633/artifacts/13622743874 ，2026-12-08 到期；亦有当前对话交付的直接 ZIP 文件。
+- **严格区分**：CI 打包后 OCR 识别通过，不等于已通过用户真实 3A 游戏截图、鼠标坐标和云希/晓晓播放验收。用户下一步应先退出旧 V1.0，解压绿色版运行；用简单桌面文字测试，再进游戏。
