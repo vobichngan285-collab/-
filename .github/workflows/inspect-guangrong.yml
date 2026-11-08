@@ -13,6 +13,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - run: python -m pip install pefile
       - name: Download original publisher package by release URL
         shell: pwsh
         run: |
