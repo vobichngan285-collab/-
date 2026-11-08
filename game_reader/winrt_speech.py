@@ -64,6 +64,16 @@ class WinRTSpeechWorker:
                 player.play()
                 if self._on_event:
                     self._on_event(f"WinRT 已合成并向播放器提交 {len(text)} 字（不证明扬声器已出声）")
+                # Speech synthesis succeeding does not prove the output device
+                # is playing. Query the WinRT playback state as a separate link.
+                await asyncio.sleep(0.28)
+                if expected_generation == generation and self._on_event:
+                    try:
+                        state = str(player.playback_session.playback_state)
+                        self._on_event("WinRT 播放器状态：" + state +
+                                       "；如仍无声，请检查系统音量混合器和输出设备")
+                    except Exception as exc:
+                        self._on_event(f"WinRT 无法查询播放状态：{exc}")
             except asyncio.CancelledError:
                 pass
             except Exception as exc:
