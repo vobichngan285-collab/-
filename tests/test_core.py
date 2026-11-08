@@ -211,3 +211,47 @@ def test_independent_guangrong_installer_requires_pinned_digest():
     from game_reader.guangrong_setup import ASSET_SHA256, RELEASE_URL
     assert len(ASSET_SHA256) == 64
     assert "shenguangrong/grtts_nvda_plugin/releases/download/" in RELEASE_URL
+
+
+
+def test_independent_guangrong_one_click_archive_setup_without_network(tmp_path, monkeypatch):
+    """The official-download installation flow is actually executable."""
+    import io
+    import zipfile
+    import hashlib
+    import game_reader.guangrong_setup as setup
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr("synthDrivers/grtts_x64.dll", b"X" * 110000)
+        archive.writestr("synthDrivers/ydvoice00.vl", b"VOICE")
+        archive.writestr("synthDrivers/some_engine.dll", b"ENGINE")
+        archive.writestr("globalPlugins/ignored.txt", b"not part of engine")
+    data = payload.getvalue()
+    runtime = tmp_path / "GuangrongIndependent"
+    monkeypatch.setattr(setup, "ASSET_SHA256", hashlib.sha256(data).hexdigest())
+    monkeypatch.setattr(setup, "runtime_directory", lambda: runtime)
+    monkeypatch.setattr(setup.urllib.request, "urlopen",
+                        lambda *args, **kwargs: io.BytesIO(data))
+    notices = []
+    dll = setup.install_official_guangrong(notices.append)
+    assert dll == str(runtime / "grtts_x64.dll")
+    assert (runtime / "ydvoice00.vl").read_bytes() == b"VOICE"
+    assert (runtime / "some_engine.dll").read_bytes() == b"ENGINE"
+    assert not (tmp_path / "globalPlugins").exists()
+    assert notices and "安装完成" in notices[-1]
+
+
+def test_independent_guangrong_setup_rejects_unverified_binary(tmp_path, monkeypatch):
+    import io,zipfile
+    import pytest
+    import game_reader.guangrong_setup as setup
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as z:
+        z.writestr("synthDrivers/grtts_x64.dll", b"A" * 110000)
+    monkeypatch.setattr(setup, "runtime_directory", lambda: tmp_path / "untrusted")
+    monkeypatch.setattr(setup, "ASSET_SHA256", "0" * 64)
+    monkeypatch.setattr(setup.urllib.request, "urlopen",
+                        lambda *args, **kwargs: io.BytesIO(payload.getvalue()))
+    with pytest.raises(ValueError, match="校验"):
+        setup.install_official_guangrong()
+    assert not (tmp_path / "untrusted").exists()
