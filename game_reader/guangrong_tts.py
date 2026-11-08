@@ -1,4 +1,4 @@
-"""Optional adapter for a user's OWN installed Guangrong TTS DLL.
+"""Optional adapter for an independently installed official Guangrong x64 DLL.
 
 The game reader does not bundle grtts.dll, NaturalVoice models or licenses.
 The vendor DLL is isolated in a spawn child process, so a failed or
@@ -13,6 +13,7 @@ import ctypes
 import multiprocessing as mp
 import os
 from pathlib import Path
+from .guangrong_setup import installed_x64_dll
 import sys
 import tempfile
 import threading
@@ -24,14 +25,20 @@ MAX_AUDIO_BYTES = 32 * 1024 * 1024
 
 
 def chosen_dll_path(value: str) -> Path | None:
-    """Only an explicitly selected grtts.dll, or its immediate directory."""
+    """Load a 64-bit engine, never the older 32-bit grtts.dll.
+
+    Accept a manually provided path only as an expert fallback. The primary
+    path is our independently installed original publisher distribution.
+    """
     if not value or not isinstance(value, str):
         return None
     p = Path(value).expanduser()
-    if p.name.lower() != "grtts.dll":
-        p = p / "grtts.dll"
+    if p.is_dir() or p.name.lower() not in ("grtts.dll", "grtts_x64.dll"):
+        p = p / "grtts_x64.dll"
+    elif p.name.lower() == "grtts.dll":
+        p = p.with_name("grtts_x64.dll")
     try:
-        if p.is_file() and p.name.lower() == "grtts.dll":
+        if p.is_file() and p.name.lower() == "grtts_x64.dll":
             return p.resolve()
     except OSError:
         pass
@@ -39,11 +46,10 @@ def chosen_dll_path(value: str) -> Path | None:
 
 
 def find_known_installed_guangrong() -> str:
-    """Look only in the conventional per-user NVDA add-on directory.
-
-    Does not recursively search system drives or access any voice/license data.
-    Non-NVDA installers can be selected using the accessible file picker.
-    """
+    """Prefer our own local runtime; otherwise try a user's existing NVDA DLL."""
+    local = installed_x64_dll()
+    if local:
+        return str(local)
     roaming = os.environ.get("APPDATA")
     if not roaming:
         return ""
@@ -54,7 +60,7 @@ def find_known_installed_guangrong() -> str:
         for folder in sorted(base.iterdir()):
             if not folder.is_dir():
                 continue
-            candidate = folder / "synthDrivers" / "grtts.dll"
+            candidate = folder / "synthDrivers" / "grtts_x64.dll"
             if candidate.is_file():
                 return str(candidate)
     except OSError:
@@ -82,7 +88,7 @@ def _guangrong_worker(pipe, path: str):
     try:
         file = chosen_dll_path(path)
         if file is None:
-            emit("error", "未找到 grtts.dll。请在已安装广荣的目录里选择原文件。")
+            emit("error", "未找到广荣 64 位 grtts_x64.dll。请点击“一键安装独立广荣”。")
             return
         if sys.platform != "win32":
             emit("error", "广荣 Windows DLL 只能在 Windows 上调用。")
@@ -322,7 +328,7 @@ def _guangrong_worker(pipe, path: str):
 def list_guangrong_voices(path: str, timeout: float = 8.0):
     """Probe only a user-selected local DLL, in a disposable child process."""
     if chosen_dll_path(path) is None:
-        return [], "尚未选择现有广荣 grtts.dll"
+        return [], "尚未安装广荣 64 位语音引擎"
     if sys.platform != "win32":
         return [], "仅支持 Windows"
     parent, child = mp.Pipe(duplex=True)
@@ -353,7 +359,7 @@ class GuangrongBridge:
     """Async native synth -> PCM -> per-request WAV -> default Windows endpoint."""
     def __init__(self, dll_path: str, on_error=None, on_event=None):
         if chosen_dll_path(dll_path) is None:
-            raise FileNotFoundError("找不到用户选择的 grtts.dll")
+            raise FileNotFoundError("找不到广荣 64 位引擎，请先一键安装官方组件")
         self.on_error, self.on_event = on_error, on_event
         self._generation = 0
         self._write_lock = threading.Lock()
