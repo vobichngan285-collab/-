@@ -1,0 +1,25 @@
+name: Inspect official Guangrong archive outside NVDA
+on:
+  workflow_dispatch:
+  push:
+    branches: ["game-text-reader-v15-guangrong-independent-*"]
+    paths: [".github/workflows/inspect-guangrong.yml", "tools/inspect_guangrong.py"]
+jobs:
+  inspect:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Download original publisher package by release URL
+        shell: pwsh
+        run: |
+          $u = "https://github.com/shenguangrong/grtts_nvda_plugin/releases/download/1.1.0/grtts.nvda-addon"
+          Invoke-WebRequest -Uri $u -OutFile "$env:RUNNER_TEMP/grtts.nvda-addon" -MaximumRedirection 10
+          if ((Get-Item "$env:RUNNER_TEMP/grtts.nvda-addon").Length -lt 50000000) { throw "Original addon download is incomplete" }
+      - name: Inspect package and run standalone vendor DLL initialization
+        shell: pwsh
+        run: |
+          python tools/inspect_guangrong.py "$env:RUNNER_TEMP/grtts.nvda-addon" "$env:RUNNER_TEMP/grtts_extract"
