@@ -91,8 +91,8 @@ def hit_test(lines: Iterable[OCRLine], x: int, y: int,
 
 
 class HoverTracker:
-    """One speech event per dwell on a line, rearmed when cursor leaves it."""
-    def __init__(self, dwell_ms: int = 150):
+    """One event immediately on entry; rearmed only after leaving the region."""
+    def __init__(self, dwell_ms: int = 0):
         self.dwell_ms = max(0, int(dwell_ms))
         self.candidate: OCRLine | None = None
         self.candidate_since_ms: float = 0
@@ -109,8 +109,45 @@ class HoverTracker:
             self.candidate_since_ms = now_ms
             # Leaving a row (even briefly over a different row) rearms it.
             self.last_spoken = None
+            if target is not None and self.dwell_ms == 0:
+                self.last_spoken = target
+                return target
             return None
         if target is not None and target != self.last_spoken and now_ms - self.candidate_since_ms >= self.dwell_ms:
             self.last_spoken = target
             return target
         return None
+
+
+def build_reading_regions(lines: Iterable[OCRLine]) -> list[OCRLine]:
+    """Group only clearly wrapped long text. Menus/short labels stay independent.
+
+    A reading region is exactly the text fed to speech and the bounding rectangle
+    shown by the mouse overlay. No guessed or invented words.
+    """
+    ordered = sorted(lines, key=lambda line: (line.top, line.left))
+    regions: list[OCRLine] = []
+    for line in ordered:
+        if not regions:
+            regions.append(line)
+            continue
+        prev = regions[-1]
+        h = max(1, prev.bottom - prev.top)
+        new_h = max(1, line.bottom - line.top)
+        gap = line.top - prev.bottom
+        aligned = abs(line.left - prev.left) <= max(12, int(max(h, new_h) * 0.75))
+        adjacent = -int(new_h * 0.1) <= gap <= max(7, int(new_h * 0.65))
+        similar_size = 0.65 <= new_h / h <= 1.55
+        long_first_line = len(prev.text) >= 14 and (prev.right - prev.left) >= 6 * new_h
+        reasonable_continuation = len(line.text) >= 3
+        if aligned and adjacent and similar_size and long_first_line and reasonable_continuation:
+            # Do not join with a sentence prefix that belongs to a different column.
+            joiner = "" if ("\u4e00" <= prev.text[-1] <= "\u9fff" and
+                            "\u4e00" <= line.text[0] <= "\u9fff") else " "
+            regions[-1] = OCRLine(prev.text + joiner + line.text,
+                                  min(prev.left, line.left), min(prev.top, line.top),
+                                  max(prev.right, line.right), max(prev.bottom, line.bottom),
+                                  min(prev.confidence, line.confidence))
+        else:
+            regions.append(line)
+    return regions
