@@ -99,6 +99,42 @@ def packaged_ui_selftest() -> int:
             root.destroy()
 
 
+
+
+def packaged_app_selftest() -> int:
+    """Run the ACTUAL V1.2 UI construction without requiring a game."""
+    import tempfile
+    import traceback
+    from pathlib import Path
+    log = Path(tempfile.gettempdir()) / "GameTextReader_app_selftest.txt"
+    root = None
+    try:
+        import tkinter as tk
+        from game_reader.app import ReaderApp
+        root = tk.Tk()
+        root.withdraw()
+        app = ReaderApp(root)
+        root.update_idletasks()
+        if app.hover.dwell_ms != 0:
+            raise RuntimeError("V1.2 must never keep the old hover delay")
+        if app.overlay is None:
+            raise RuntimeError("Native green outline initialization failed: " +
+                               app.overlay_error)
+        if "PROVIDED" not in app.accessibility_status and "ANNOTATED" not in app.accessibility_status:
+            raise RuntimeError("Accessible widget provider failed: " +
+                               app.accessibility_status)
+        app.close()
+        root = None
+        log.write_text("PASS\nFull V1.2 window, accessibility and frame ready", encoding="utf-8")
+        return 0
+    except BaseException:
+        log.write_text("FAIL\n" + traceback.format_exc(), encoding="utf-8")
+        return 1
+    finally:
+        if root is not None:
+            root.destroy()
+
+
 if __name__ == "__main__":
     multiprocessing.freeze_support()
     if "--self-test-ocr" in sys.argv:
@@ -107,5 +143,7 @@ if __name__ == "__main__":
         raise SystemExit(packaged_tts_selftest())
     if "--self-test-ui" in sys.argv:
         raise SystemExit(packaged_ui_selftest())
+    if "--self-test-app" in sys.argv:
+        raise SystemExit(packaged_app_selftest())
     from game_reader.app import run
     run()
