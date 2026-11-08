@@ -55,7 +55,7 @@ def write_settings(settings: dict):
 class ReaderApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("游戏文字助手 V1.0 · 离线")
+        self.root.title("游戏文字助手 V1.1 · 离线")
         self.root.geometry("580x620")
         self.root.minsize(500, 510)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
