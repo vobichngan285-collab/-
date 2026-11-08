@@ -32,7 +32,9 @@ class SpeechWorker:
     def __init__(self, on_error=None):
         self._commands = Queue()
         self._on_error = on_error
-        self._winrt = WinRTSpeechWorker(on_error=on_error)
+        self._winrt = None  # create WinRT media player only if WinRT voice is selected
+        self._rate = 0
+        self._volume = 100
         self._mode = "sapi"
         self._thread = Thread(target=self._loop, daemon=True, name="LocalSAPI")
         self._thread.start()
@@ -51,17 +53,23 @@ class SpeechWorker:
                     continue
                 if command == "exit":
                     voice.Speak("", 3)
-                    self._winrt.send("exit")
+                    if self._winrt is not None:
+                        self._winrt.send("exit")
                     break
                 try:
                     if command == "stop":
                         voice.Speak("", 3)
-                        self._winrt.send("stop")
+                        if self._winrt is not None:
+                            self._winrt.send("stop")
                     elif command == "voice" and arg:
                         voice.Speak("", 3)
                         self._winrt.send("stop")
                         if arg.startswith("winrt:"):
                             self._mode = "winrt"
+                            if self._winrt is None:
+                                self._winrt = WinRTSpeechWorker(on_error=self._on_error)
+                                self._winrt.send("rate", str(self._rate))
+                                self._winrt.send("volume", str(self._volume))
                             self._winrt.send("voice", arg[len("winrt:"):])
                         else:
                             self._mode = "sapi"
@@ -73,13 +81,18 @@ class SpeechWorker:
                                     break
                     elif command == "rate" and arg is not None:
                         voice.Rate = max(-10, min(10, int(arg)))
-                        self._winrt.send("rate", arg)
+                        self._rate = int(arg)
+                        if self._winrt is not None:
+                            self._winrt.send("rate", arg)
                     elif command == "volume" and arg is not None:
                         voice.Volume = max(0, min(100, int(arg)))
-                        self._winrt.send("volume", arg)
+                        self._volume = int(arg)
+                        if self._winrt is not None:
+                            self._winrt.send("volume", arg)
                     elif command == "speak" and arg:
                         if self._mode == "winrt":
-                            self._winrt.send("speak", arg)
+                            if self._winrt is not None:
+                                self._winrt.send("speak", arg)
                         else:
                             voice.Speak(arg, 3)
                 except Exception as exc:
