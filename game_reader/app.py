@@ -280,8 +280,8 @@ class ReaderApp:
                 lines = self.ocr_worker.recognize(image, origin, tier)
                 self.events.put(("ocr_ok", lines, int((time.monotonic() - started) * 1000)))
             except Exception as exc:
-                detail = ("phase: " + phase + "\\n" +
-                          "error: " + type(exc).__name__ + ": " + str(exc) + "\\n" +
+                detail = ("phase: " + phase + "\n" +
+                          "error: " + type(exc).__name__ + ": " + str(exc) + "\n" +
                           traceback.format_exc())
                 self.events.put(("ocr_fail", detail))
         threading.Thread(target=work, daemon=True, name="LocalPaddleOCR").start()
@@ -314,7 +314,7 @@ class ReaderApp:
                     except OSError:
                         pass
                     self.status("识别失败。点击“复制失败诊断”获取具体错误；不会保存截图或文字。")
-                    self.update_output(self.last_ocr_error.splitlines()[0] + "\\n" +
+                    self.update_output(self.last_ocr_error.splitlines()[0] + "\n" +
                                        self.last_ocr_error.splitlines()[1])
                     self.speech.speak("识别失败。")
                 elif event[0] == "voices":
