@@ -9,6 +9,7 @@ import os
 import sys
 import threading
 import time
+import traceback
 import tkinter as tk
 from pathlib import Path
 from queue import Empty, Queue
@@ -22,6 +23,7 @@ from .speech import SpeechWorker, enumerate_sapi_voices
 APP_NAME = "游戏文字助手"
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "GameTextReader"
 CONFIG_PATH = CONFIG_DIR / "settings.json"
+ERROR_LOG = CONFIG_DIR / "last_ocr_error.txt"
 DEFAULTS = {"vk": 0x77, "hotkey_label": "F8", "tier": "small", "voice": "",
             "rate": 0, "volume": 100, "dwell_ms": 150}
 MODIFIER_KEYS = {16, 17, 18, 91, 92}
@@ -59,6 +61,7 @@ class ReaderApp:
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.settings = read_settings()
         self.events: Queue[tuple] = Queue()
+        self.last_ocr_error = ""
         self.lines: list[OCRLine] = []
         self.ocr_worker = LocalOCR()
         self.busy = False
@@ -135,6 +138,7 @@ class ReaderApp:
         actions.pack(fill="x", pady=(10, 6))
         self.read_btn = ttk.Button(actions, text="立即截屏识别", command=self.capture_from_button)
         self.read_btn.pack(side="left")
+        ttk.Button(actions, text="复制失败诊断", command=self.copy_error).pack(side="left", padx=(7, 0))
         ttk.Button(actions, text="最小化到任务栏", command=self.root.iconify).pack(side="left", padx=7)
         ttk.Button(actions, text="清除识别结果", command=self.clear).pack(side="left")
         self.status_var = tk.StringVar(value="就绪。建议先最小化窗口，再打开游戏菜单并按截图快捷键。")
@@ -245,6 +249,15 @@ class ReaderApp:
         self.update_output("")
         self.status("已清除当前截图识别结果。")
 
+    def copy_error(self):
+        if not self.last_ocr_error:
+            self.status("当前没有可以复制的 OCR 失败诊断。")
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(self.last_ocr_error)
+        self.root.update_idletasks()
+        self.status("错误诊断已复制，可直接粘贴给开发人员；不含截图或识别文字。")
+
     def capture_from_button(self):
         # Hide our own settings window before the capture, so it is not OCR'd.
         self.root.iconify()
@@ -260,12 +273,17 @@ class ReaderApp:
         tier = self.settings["tier"]
         def work():
             started = time.monotonic()
+            phase = "Windows屏幕截图"
             try:
                 image, origin = grab_current_monitor()
+                phase = f"本地PaddleOCR加载或推理 ({tier})"
                 lines = self.ocr_worker.recognize(image, origin, tier)
                 self.events.put(("ocr_ok", lines, int((time.monotonic() - started) * 1000)))
             except Exception as exc:
-                self.events.put(("ocr_fail", f"{type(exc).__name__}: {exc}"))
+                detail = ("phase: " + phase + "\\n" +
+                          "error: " + type(exc).__name__ + ": " + str(exc) + "\\n" +
+                          traceback.format_exc())
+                self.events.put(("ocr_fail", detail))
         threading.Thread(target=work, daemon=True, name="LocalPaddleOCR").start()
 
     def poll_messages(self):
@@ -289,7 +307,15 @@ class ReaderApp:
                 elif event[0] == "ocr_fail":
                     self.busy = False
                     self.read_btn.configure(state="normal")
-                    self.status("识别失败：" + event[1])
+                    self.last_ocr_error = event[1]
+                    try:
+                        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+                        ERROR_LOG.write_text(self.last_ocr_error[-25000:], encoding="utf-8")
+                    except OSError:
+                        pass
+                    self.status("识别失败。点击“复制失败诊断”获取具体错误；不会保存截图或文字。")
+                    self.update_output(self.last_ocr_error.splitlines()[0] + "\\n" +
+                                       self.last_ocr_error.splitlines()[1])
                     self.speech.speak("识别失败。")
                 elif event[0] == "voices":
                     self.voices = event[1]
