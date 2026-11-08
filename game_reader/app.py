@@ -22,7 +22,6 @@ from .ocr_backend import LocalOCR
 from .win_screen import enable_dpi_awareness, get_cursor, is_key_down, grab_current_monitor
 from .speech import SpeechWorker, enumerate_sapi_voices
 from .voice_info import preferred_voice_index, narrator_package_names, voice_diagnostic
-from .screen_change import signature_from_image, capture_signature, SceneGuard
 from .cues import CuePlayer
 
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "GameTextReader"
@@ -32,7 +31,6 @@ DEFAULTS = {"vk": 0x77, "hotkey_label": "F8", "tier": "small", "voice": "",
             "rate": 0, "volume": 100, "dwell_ms": 0}
 MODIFIER_KEYS = {16, 17, 18, 91, 92}
 RESULT_TTL_SECONDS = 60.0
-SCREEN_SAMPLE_SECONDS = 0.24
 
 
 def read_settings() -> dict:
@@ -63,7 +61,7 @@ def write_settings(settings: dict) -> None:
 class ReaderApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        root.title("游戏文字助手 V1.2 · 离线")
+        root.title("游戏文字助手 V1.3 · 离线")
         root.geometry("610x650")
         root.minsize(560, 590)
         root.protocol("WM_DELETE_WINDOW", self.close)
@@ -75,19 +73,24 @@ class ReaderApp:
         self.busy = False
         self.closed = False
         self.capture_id = 0
-        self.scene_state = None
         self.expires_at = None
         self.last_target = None
         self.last_ocr_error = ""
+        self.runtime_events: list[str] = []
+        self.last_ocr_metrics: dict = {}
         self.voice_report = "尚未扫描语音。"
         self.voices: list[tuple[str, str]] = []
         self.setting_hotkey = False
         self.key_previous = False
         self.hover = HoverTracker(0)
-        self.speech = SpeechWorker(on_error=lambda e: self.events.put(("tts_error", e)))
+        self.speech = SpeechWorker(
+            on_error=lambda e: self.events.put(("tts_error", e)),
+            on_event=lambda e: self.events.put(("audio_event", e)))
         self.speech.set_rate(self.settings["rate"])
         self.speech.set_volume(self.settings["volume"])
-        self.cues = CuePlayer()
+        self.cues = CuePlayer(
+            on_error=lambda e: self.events.put(("cue_error", e)),
+            on_event=lambda e: self.events.put(("audio_event", e)))
         self.overlay = None
         self.overlay_error = ""
         try:
@@ -101,17 +104,15 @@ class ReaderApp:
         self.scan_voices()
         self.root.after(25, self.poll_input)
         self.root.after(40, self.poll_messages)
-        self.scene_thread = threading.Thread(target=self.monitor_scene, daemon=True,
-                                             name="LowResolutionSceneGuard")
-        self.scene_thread.start()
+        self.prewarm_model(self.settings["tier"])
 
     def create_widgets(self):
         p = ttk.Frame(self.root, padding=12)
         p.pack(fill="both", expand=True)
-        ttk.Label(p, text="游戏文字助手 V1.2",
+        ttk.Label(p, text="游戏文字助手 V1.3",
                   font=("Microsoft YaHei UI", 16, "bold")).pack(anchor="w")
         ttk.Label(p, text="按 F8 截图识别，鼠标进入文字区域立刻朗读；"
-                  "60 秒或检测到画面切换时自动清空旧结果。",
+                  "按 F8 更新旧结果，识别结果最多保留 60 秒。",
                   wraplength=570).pack(anchor="w", pady=(2, 8))
         keys = ttk.LabelFrame(p, text="截图热键", padding=8)
         keys.pack(fill="x", pady=3)
@@ -149,6 +150,8 @@ class ReaderApp:
         self.preview_button = ttk.Button(vr, text="试听",
                                          command=self.test_voice)
         self.preview_button.pack(side="left", padx=5)
+        self.cue_test_button = ttk.Button(vr, text="试听提示音", command=self.test_cues)
+        self.cue_test_button.pack(side="left", padx=5)
         self.stop_button = ttk.Button(vr, text="停止朗读",
                                       command=self.speech.stop)
         self.stop_button.pack(side="left")
@@ -189,6 +192,9 @@ class ReaderApp:
         self.read_btn.pack(side="left")
         ttk.Button(controls, text="复制失败诊断",
                    command=self.copy_error).pack(side="left", padx=5)
+        self.runtime_log_button = ttk.Button(controls, text="复制链路日志",
+                                              command=self.copy_runtime_log)
+        self.runtime_log_button.pack(side="left", padx=5)
         ttk.Button(controls, text="最小化到任务栏",
                    command=self.root.iconify).pack(side="left")
         ttk.Button(controls, text="清除所有结果",
@@ -207,8 +213,8 @@ class ReaderApp:
         self.output.configure(yscrollcommand=scroll.set)
         self.output.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
-        ttk.Label(p, text="场景变化检测只对低分辨率画面比对，不连续识字。"
-                  "动态游戏画面可能误判；按 F8 可随时刷新。",
+        ttk.Label(p, text="已移除自动画面检测：动画不会再误删结果。"
+                  "新画面请按 F8 刷新；60 秒后自动清空。",
                   wraplength=570).pack(anchor="w", pady=(6, 0))
 
     def enable_accessibility(self):
@@ -228,6 +234,38 @@ class ReaderApp:
         except Exception as exc:
             self.accessibility_status = "FAILED: " + str(exc)
             self.events.put(("ui_error", self.accessibility_status))
+
+    def trace(self, message: str):
+        """Only numeric stages and audio states: no screenshot or recognized text."""
+        stamp = time.strftime("%H:%M:%S")
+        self.runtime_events.append(f"{stamp} {message}")
+        self.runtime_events = self.runtime_events[-70:]
+
+    def prewarm_model(self, tier: str):
+        def work():
+            try:
+                ms = self.ocr_worker.prepare(tier)
+                self.events.put(("model_ready", tier, ms))
+            except Exception as exc:
+                self.events.put(("model_warm_error", tier, f"{type(exc).__name__}: {exc}"))
+        threading.Thread(target=work, name="ModelPreload", daemon=True).start()
+
+    def copy_runtime_log(self):
+        info = [
+            "GameTextReader V1.3 | 仅数值与状态，不含截图和识别文字",
+            f"当前模型：{self.settings['tier']}",
+            f"当前识别文字区域：{len(self.lines)}",
+            f"当前选择的 TTS ID：{self.settings.get('voice') or '自动'}",
+            "最近 OCR 阶段耗时：" + str(self.last_ocr_metrics),
+            "最近事件：",
+            *self.runtime_events[-70:],
+        ]
+        self.copy_text("\\n".join(info), "已复制完整链路日志，不包含 OCR 文字。")
+
+    def test_cues(self):
+        self.trace("用户主动试听提示音（与 OCR 和 TTS 无关）")
+        self.cues.play("complete")
+        self.cues.play("hover")
 
     def status(self, message: str):
         self.status_var.set(message)
@@ -272,6 +310,7 @@ class ReaderApp:
     def change_model(self):
         self.settings["tier"] = self.tier_var.get()
         self.persist()
+        self.prewarm_model(self.settings["tier"])
 
     def scan_voices(self):
         self.voice_select.configure(state="disabled")
@@ -293,6 +332,7 @@ class ReaderApp:
             self.persist()
 
     def test_voice(self):
+        self.trace("TTS 试听：准备提交 21 字，独立于 OCR")
         self.speech.speak("你好，这是电脑游戏文字助手的本地语音试听。")
 
     def copy_voice_report(self):
@@ -330,7 +370,6 @@ class ReaderApp:
     def invalidate(self, reason: str):
         """Actually erase all text, coordinates, hover state and audio."""
         self.capture_id += 1
-        self.scene_state = None
         self.expires_at = None
         self.lines = []
         self.last_target = None
@@ -343,7 +382,7 @@ class ReaderApp:
 
     def capture_from_button(self):
         self.root.iconify()
-        self.root.after(250, self.capture)
+        self.root.after(100, self.capture)
 
     def capture(self):
         if self.busy:
@@ -353,49 +392,25 @@ class ReaderApp:
         self.busy = True
         self.read_btn.configure(state="disabled")
         tier = self.settings["tier"]
+        self.trace(f"F8 截图触发，模型={tier}")
 
         def worker():
-            started = time.monotonic()
+            started = time.perf_counter()
             phase = "截图"
             try:
                 image, origin = grab_current_monitor()
-                signature = signature_from_image(image, origin)
-                phase = f"离线OCR推理（{tier}）"
-                lines = self.ocr_worker.recognize(image, origin, tier)
-                self.events.put(("ocr_ok", capture_id, lines, signature,
-                                 round((time.monotonic() - started) * 1000)))
-            except Exception as exc:
-                self.events.put(("ocr_fail", capture_id,
-                                 "phase: " + phase + "\n" +
-                                 traceback.format_exc()))
-        threading.Thread(target=worker, daemon=True, name="OneShotOCR").start()
-
-    def monitor_scene(self):
-        """Only small screenshots; never OCR in this background thread."""
-        previous_state = None
-        guard = None
-        while not self.closed:
-            time.sleep(SCREEN_SAMPLE_SECONDS)
-            state = self.scene_state
-            if state is None or self.busy:
-                previous_state = None
-                guard = None
-                continue
-            if state is not previous_state:
-                previous_state = state
-                guard = SceneGuard(state[1])
-            capture_id, original = state
-            try:
-                current = capture_signature(original.origin, original.screen_size)
-                if guard.changed(current):
-                    if self.scene_state is state:
-                        self.events.put(("scene_changed", capture_id))
-                    previous_state = None
-                    guard = None
+                grab_ms = round((time.perf_counter() - started) * 1000)
+                phase = f"离线OCR推理 ({tier})"
+                lines, timing = self.ocr_worker.recognize_timed(image, origin, tier)
+                total_ms = round((time.perf_counter() - started) * 1000)
+                timing["grab_ms"] = grab_ms
+                timing["total_ms"] = total_ms
+                timing["input_resolution"] = f"{image.width}x{image.height}"
+                self.events.put(("ocr_ok", capture_id, lines, timing))
             except Exception:
-                # Fail open on a transient capture error: the TTL still works.
-                previous_state = None
-                guard = None
+                self.events.put(("ocr_fail", capture_id,
+                                 "phase: " + phase + "\\n" + traceback.format_exc()))
+        threading.Thread(target=worker, daemon=True, name="OneShotOCR").start()
 
     def poll_messages(self):
         try:
@@ -403,7 +418,7 @@ class ReaderApp:
                 event = self.events.get_nowait()
                 kind = event[0]
                 if kind == "ocr_ok":
-                    _, capture_id, lines, signature, milliseconds = event
+                    _, capture_id, lines, timing = event
                     self.busy = False
                     self.read_btn.configure(state="normal")
                     if capture_id != self.capture_id:
@@ -414,9 +429,17 @@ class ReaderApp:
                     self.update_output("\n".join(region.text for region in self.lines))
                     if self.lines:
                         self.expires_at = time.monotonic() + RESULT_TTL_SECONDS
-                        self.scene_state = (capture_id, signature)
-                    self.status(f"识别完成：{len(self.lines)} 个朗读区域；"
-                                f"耗时 {milliseconds} 毫秒。60 秒后自动清空。")
+                    self.last_ocr_metrics = dict(timing)
+                    self.trace(f"OCR 完成：{timing}；可朗读区域 {len(self.lines)}")
+                    if not self.lines:
+                        self.status(f"{timing['tier']} OCR 完成，但没有有效文字。"
+                                    "这不是 TTS 错误；请复制链路日志。")
+                    else:
+                        self.status(
+                            f"{timing['tier']}：{len(self.lines)} 区域｜"
+                            f"截图 {timing['grab_ms']}ms｜加载/等待 {timing['model_ms']}ms｜"
+                            f"推理 {timing['inference_ms']}ms｜总 {timing['total_ms']}ms。"
+                            "文字有效期 60 秒。")
                     self.cues.play("complete")
                 elif kind == "ocr_fail":
                     _, capture_id, detail = event
@@ -425,6 +448,7 @@ class ReaderApp:
                     if capture_id != self.capture_id:
                         continue
                     self.last_ocr_error = detail
+                    self.trace("OCR 报错：" + detail.splitlines()[0])
                     try:
                         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
                         ERROR_LOG.write_text(detail[-24000:], encoding="utf-8")
@@ -432,9 +456,6 @@ class ReaderApp:
                         pass
                     self.status("识别失败。点击“复制失败诊断”查看错误。")
                     self.update_output("识别失败。")
-                elif kind == "scene_changed":
-                    if event[1] == self.capture_id and self.scene_state is not None:
-                        self.invalidate("检测到游戏画面变化，旧文字和框已全部清空；按 F8 重新识别。")
                 elif kind == "voices":
                     _, voices, packages = event
                     self.voices = voices
@@ -459,7 +480,17 @@ class ReaderApp:
                                                 "点击“复制语音诊断”获取详情。")
                     else:
                         self.voice_var.set("未找到可调用的本地语音")
+                elif kind == "model_ready":
+                    self.trace(f"{event[1]} 模型后台预热完成，耗时 {event[2]}ms")
+                elif kind == "model_warm_error":
+                    self.trace(f"{event[1]} 模型后台预热失败：{event[2]}")
+                elif kind == "audio_event":
+                    self.trace("音频：" + str(event[1]))
+                elif kind == "cue_error":
+                    self.trace("音效错误：" + str(event[1]))
+                    self.status("提示音播放错误，详见“复制链路日志”。")
                 elif kind == "tts_error":
+                    self.trace("TTS 错误：" + str(event[1]))
                     self.status("TTS 出错：" + event[1])
                 elif kind == "ui_error":
                     self.status("无障碍接口初始化异常：" + event[1])
@@ -493,6 +524,7 @@ class ReaderApp:
                 # Zero dwell. The first poll entering the region speaks once.
                 to_read = self.hover.update(target, time.monotonic() * 1000)
                 if to_read is not None:
+                    self.trace(f"鼠标命中文字；向 TTS 提交 {len(to_read.text)} 字")
                     self.cues.play("hover")
                     self.speech.speak(to_read.text)
         except Exception as exc:
@@ -501,7 +533,6 @@ class ReaderApp:
 
     def close(self):
         self.closed = True
-        self.scene_state = None
         self.speech.shutdown()
         self.cues.shutdown()
         if self.overlay is not None:
