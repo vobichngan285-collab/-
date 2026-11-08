@@ -45,6 +45,14 @@ jobs:
         run: |
           pyinstaller --clean --noconfirm --onedir --windowed --name GameTextReader --collect-all paddleocr --collect-all paddlex --collect-all paddle --collect-all win32com --add-data 'models;models' main.py
           if (-not (Test-Path dist/GameTextReader/GameTextReader.exe)) { throw 'EXE missing' }
+      - name: Run actual frozen Windows EXE with both OCR models
+        shell: pwsh
+        run: |
+          & dist/GameTextReader/GameTextReader.exe --self-test-ocr
+          $exitCode = $LASTEXITCODE
+          $log = Join-Path $env:TEMP "GameTextReader_ocr_selftest.txt"
+          if (Test-Path $log) { Get-Content $log }
+          if ($exitCode -ne 0) { throw "Frozen EXE OCR smoke test failed (exit code $exitCode)" }
       - name: Check presence of bundled models
         shell: pwsh
         run: |
