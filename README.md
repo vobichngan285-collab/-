@@ -1,3 +1,22 @@
+# V1.3 Windows 游戏文字助手 · 2026-11-09 修复与诊断版
+
+**下载**：[Windows 11 x64 免安装 ZIP（已通过 Windows CI）](https://github.com/vobichngan285-collab/-/actions/runs/42504162008/artifacts/13627010787)，直接解压运行 `GameTextReader/GameTextReader.exe`。GitHub 下载有一层外部 artifact ZIP，聊天提供的直接文件无需重复解压外层。**用户机器实际游戏、音效、云希/晓晓尚未验收。**
+
+- **从代码中删除了整个自动画面变化检测模块和后台截图线程**，避免游戏动画导致错清结果。现在只按 F8 立即清除上一批 OCR 文字/坐标/框/语音并刷新，或在 60 秒后自动清空。因此切屏后若没有再按 F8，旧识别结果可能在到期前继续存在。
+- Small/Medium OCR 模型仍为原官方 PP-OCRv6 DET+REC，且已在 Windows CI 上对英文和暗底中文菜单分别成功识别。Medium **不是坏模型**；它的完整 DET 推理计算量更大。在该 CI 测试图中 Medium 检测约 2.60 秒、Small 检测约 0.62 秒；真实游戏延迟以新诊断数据为准。
+- 软件后台预热**当前选中的一个** OCR 模型（RapidOCR 首次调用懒加载，必须有真实文字触发 REC 加载），避免平时按 F8 才开始冷启动；OCR 模型切换后再次预热。删除一次重复的 RGB 全屏复制，打开的设置窗口隐藏后从 250ms 等待缩短到 100ms。
+- **新增「复制链路日志」**：区分截图、OCR 初始化/等待、推理、raw 与有效文字行数、鼠标命中、TTS 提交、WinRT 播放器状态、音效接受与错误；日志不含照片或识别文字。新增独立的「试听提示音」按钮。
+- 提高两种原创金属/短嗒提示音的可辨度，并在失败时显示提示（不会阻塞 TTS）。无障碍 Tk UIA 和绿色 click-through 文字框保留。
+- **用户报告无声问题尚未在用户机器定位完成**。Windows CI 本次真正用 SAPI 生成了 131862 字节 WAV，也通过 WinRT 生成了 66286 字节的语音流；这是**合成成功，不等于扬声器播放成功**。云希/晓晓 Narrator 专用自然音色若未对第三方公开 API 开放，仍不会出现在列表中。
+- CI [42504162008](https://github.com/vobichngan285-collab/-/actions/runs/42504162008) 最终 **success**，14 个逻辑测试、源代码和打包 EXE 上 Small/Medium 英文与暗底中文 OCR、SAPI/WinRT 音频生成、UI 无障碍和实际 EXE 启动均通过。
+- `GameTextReader_V1.3_Windows_x64_Portable.zip`：**232059188 字节（约 221.3 MiB）**，SHA256 `8ddd216b4aa012630c2ed8e70776e22700738d5e46ad7a7582b3cbc8fd39b67e`；唯一提供绿色 ZIP，不再制作安装器。
+
+### V1.3 真人实机定位步骤
+
+选择一款 SAPI 声音（如 Huihui Desktop）并点击「试听」；再选择 WinRT 的中文声音并点击「试听」，比较两者。单独点击「试听提示音」。进入游戏、F8 识别并鼠标指向文字后，打开主窗口点击「复制链路日志」，复制文本发送。若识别了零行，日志会明确显示是 OCR 未返回有效文字，而不是把它误报成 TTS 故障。请确保音频输出设备/音量混合器没有静音。保益悦听和绿色框在 V1.2 已由用户反馈可以正常使用，V1.3 没替换这些控件。
+
+---
+
 # 游戏文字助手 V1.2 · Windows 11 免安装版
 
 **当前开发版本：V1.2（2026-11-09）。** Windows x64 单击运行，不需要安装 Python。可下载 [V1.2 Windows Actions 构建产物](https://github.com/vobichngan285-collab/-/actions/runs/42500629157/artifacts/13625800422)（GitHub 产物下载外层 ZIP 里有绿色版 ZIP）。
