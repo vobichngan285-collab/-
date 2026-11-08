@@ -70,4 +70,4 @@ def grab_current_monitor() -> tuple[Image.Image, tuple[int, int]]:
     expected_size = (right - left, bottom - top)
     if img.size != expected_size:
         raise RuntimeError(f"Capture size mismatch: {img.size} vs {expected_size}")
-    return img.convert("RGB"), (left, top)
+    return img if img.mode == "RGB" else img.convert("RGB"), (left, top)

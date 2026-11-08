@@ -54,7 +54,7 @@ def packaged_ocr_selftest() -> int:
                 report.append(f"{tier} Chinese dark: {len(cn_lines)} rows, "
                               f"timings={cn_timing}, text=" +
                               "|".join(row.text for row in cn_lines))
-                if not any(any("\\u4e00" <= ch <= "\\u9fff" for ch in row.text)
+                if not any(any("一" <= ch <= "鿿" for ch in row.text)
                            for row in cn_lines):
                     raise RuntimeError(f"{tier}: no Chinese characters on dark menu; "
                                        f"raw={cn_timing['raw_lines']}, lines={cn_lines}")

@@ -113,7 +113,7 @@ class LocalOCR:
             self._load(tier)
             model_ms = _milliseconds(start)
             t0 = time.perf_counter()
-            array = np.asarray(image.convert("RGB"))
+            array = np.asarray(image if image.mode == "RGB" else image.convert("RGB"))
             convert_ms = _milliseconds(t0)
             t1 = time.perf_counter()
             result = self.engine(array, use_cls=False)
