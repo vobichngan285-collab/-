@@ -1,33 +1,39 @@
-"""Local Windows SAPI voice enumeration / interruptible asynchronous TTS.
-
-No network, no protected Windows Narrator package bypass. Voices appear only if
-legitimately exposed to SAPI5 by Windows or an installed SAPI adapter.
-"""
+"""Local Windows speech. SAPI and documented WinRT voices, no cloud APIs."""
 from __future__ import annotations
 from queue import Queue, Empty
 from threading import Thread
 import sys
+from .winrt_speech import WinRTSpeechWorker, enumerate_winrt_voices
 
 
 def enumerate_sapi_voices() -> list[tuple[str, str]]:
+    """Expose only genuine, installed and callable SAPI + WinRT voices."""
     if sys.platform != "win32":
         return []
+    voices = []
     import pythoncom
     import win32com.client
     pythoncom.CoInitialize()
     try:
         speaker = win32com.client.Dispatch("SAPI.SpVoice")
-        voices = speaker.GetVoices()
-        return [(voices.Item(i).Id, voices.Item(i).GetDescription())
-                for i in range(voices.Count)]
+        items = speaker.GetVoices()
+        voices.extend((items.Item(i).Id, items.Item(i).GetDescription())
+                      for i in range(items.Count))
     finally:
         pythoncom.CoUninitialize()
+    ids = {id_ for id_, _ in voices}
+    for entry in enumerate_winrt_voices():
+        if entry[0] not in ids:
+            voices.append(entry)
+    return voices
 
 
 class SpeechWorker:
     def __init__(self, on_error=None):
-        self._commands: Queue[tuple[str, str | None]] = Queue()
+        self._commands = Queue()
         self._on_error = on_error
+        self._winrt = WinRTSpeechWorker(on_error=on_error)
+        self._mode = "sapi"
         self._thread = Thread(target=self._loop, daemon=True, name="LocalSAPI")
         self._thread.start()
 
@@ -45,30 +51,44 @@ class SpeechWorker:
                     continue
                 if command == "exit":
                     voice.Speak("", 3)
+                    self._winrt.send("exit")
                     break
                 try:
                     if command == "stop":
-                        voice.Speak("", 3)  # async | purge previous
+                        voice.Speak("", 3)
+                        self._winrt.send("stop")
                     elif command == "voice" and arg:
-                        items = voice.GetVoices()
-                        for i in range(items.Count):
-                            item = items.Item(i)
-                            if item.Id == arg:
-                                voice.Voice = item
-                                break
+                        voice.Speak("", 3)
+                        self._winrt.send("stop")
+                        if arg.startswith("winrt:"):
+                            self._mode = "winrt"
+                            self._winrt.send("voice", arg[len("winrt:"):])
+                        else:
+                            self._mode = "sapi"
+                            items = voice.GetVoices()
+                            for i in range(items.Count):
+                                item = items.Item(i)
+                                if item.Id == arg:
+                                    voice.Voice = item
+                                    break
                     elif command == "rate" and arg is not None:
                         voice.Rate = max(-10, min(10, int(arg)))
+                        self._winrt.send("rate", arg)
                     elif command == "volume" and arg is not None:
                         voice.Volume = max(0, min(100, int(arg)))
+                        self._winrt.send("volume", arg)
                     elif command == "speak" and arg:
-                        voice.Speak(arg, 3)  # SAPI async plus purge, non-blocking
-                except Exception as ex:
+                        if self._mode == "winrt":
+                            self._winrt.send("speak", arg)
+                        else:
+                            voice.Speak(arg, 3)
+                except Exception as exc:
                     if self._on_error:
-                        self._on_error(str(ex))
+                        self._on_error(str(exc))
                 pythoncom.PumpWaitingMessages()
-        except Exception as ex:
+        except Exception as exc:
             if self._on_error:
-                self._on_error(str(ex))
+                self._on_error(str(exc))
         finally:
             pythoncom.CoUninitialize()
 
