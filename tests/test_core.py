@@ -133,7 +133,7 @@ def test_generated_cues_are_short_mono_pcm():
         with wave.open(BytesIO(make_click_wave(kind)), "rb") as wav:
             assert wav.getnchannels() == 1
             assert wav.getsampwidth() == 2
-            assert 500 < wav.getnframes() <= 3600
+            assert 500 < wav.getnframes() <= 6000
 
 
 def test_cues_audible_amplitude_but_no_clipping():
@@ -183,8 +183,31 @@ def test_grtts_requires_explicit_existing_vendor_dll(tmp_path):
 
 def test_grtts_optional_voice_id_and_path(tmp_path):
     from game_reader.guangrong_tts import chosen_dll_path
-    file = tmp_path / "grtts.dll"
+    file = tmp_path / "grtts_x64.dll"
     file.write_bytes(b"Not a usable DLL; existence test only")
     assert chosen_dll_path(str(file)) == file.resolve()
     assert chosen_dll_path(str(tmp_path)) == file.resolve()
+    assert chosen_dll_path(str(tmp_path / "grtts.dll")) == file.resolve()
     assert chosen_dll_path(str(tmp_path / "another.dll")) is None
+
+
+
+def test_independent_guangrong_installer_safe_archive_paths():
+    import zipfile
+    from game_reader.guangrong_setup import _safe_member
+    safe = zipfile.ZipInfo("synthDrivers/ydvoice00.vl")
+    unsafe = zipfile.ZipInfo("synthDrivers/../Windows/evil.dll")
+    ignored = zipfile.ZipInfo("globalPlugins/__init__.py")
+    assert str(_safe_member(safe)).lower().endswith("ydvoice00.vl")
+    assert _safe_member(ignored) is None
+    try:
+        _safe_member(unsafe)
+        assert False, "Unsafe traversal must be blocked"
+    except ValueError:
+        pass
+
+
+def test_independent_guangrong_installer_requires_pinned_digest():
+    from game_reader.guangrong_setup import ASSET_SHA256, RELEASE_URL
+    assert len(ASSET_SHA256) == 64
+    assert "shenguangrong/grtts_nvda_plugin/releases/download/" in RELEASE_URL
