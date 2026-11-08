@@ -22,7 +22,7 @@ from .win_screen import enable_dpi_awareness, get_cursor, is_key_down, grab_curr
 from .speech import SpeechWorker, enumerate_sapi_voices
 from .voice_info import preferred_voice_index, narrator_package_names, voice_diagnostic
 from .cues import CuePlayer
-from .guangrong_tts import list_guangrong_voices, chosen_dll_path
+from .guangrong_tts import list_guangrong_voices, chosen_dll_path, find_known_installed_guangrong
 
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "GameTextReader"
 CONFIG_PATH = CONFIG_DIR / "settings.json"
@@ -67,6 +67,10 @@ class ReaderApp:
         root.protocol("WM_DELETE_WINDOW", self.close)
 
         self.settings = read_settings()
+        if not self.settings.get("guangrong_dir"):
+            found = find_known_installed_guangrong()
+            if found:
+                self.settings["guangrong_dir"] = found
         self.events: Queue[tuple] = Queue()
         self.lines: list[OCRLine] = []
         self.ocr_worker = LocalOCR()
