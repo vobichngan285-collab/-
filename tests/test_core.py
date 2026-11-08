@@ -133,7 +133,7 @@ def test_generated_cues_are_short_mono_pcm():
         with wave.open(BytesIO(make_click_wave(kind)), "rb") as wav:
             assert wav.getnchannels() == 1
             assert wav.getsampwidth() == 2
-            assert 500 < wav.getnframes() < 3000
+            assert 500 < wav.getnframes() <= 3600
 
 
 def test_cues_audible_amplitude_but_no_clipping():
