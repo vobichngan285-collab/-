@@ -27,7 +27,7 @@ class ScreenRegionPicker(tk.Toplevel):
         self.overrideredirect(True)
         self.geometry(f"{self._width}x{self._height}{left:+d}{top:+d}")
         self.attributes("-topmost", True)
-        self.attributes("-alpha", 0.72)
+        self.attributes("-alpha", 0.52)
         self.canvas = tk.Canvas(
             self, width=self._width, height=self._height, bg="#111722",
             highlightthickness=0, cursor="crosshair")
@@ -64,13 +64,17 @@ class ScreenRegionPicker(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         self.lift()
         self.after(20, self._activate)
+        self.after(160, self._activate)
 
     def _activate(self):
         if self._finished:
             return
         try:
+            self.attributes("-topmost", True)
+            self.lift()
             self.focus_force()
-            self.grab_set()
+            if self.grab_current() is None:
+                self.grab_set()
         except tk.TclError:
             pass
 
