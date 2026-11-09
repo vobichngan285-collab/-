@@ -1,11 +1,12 @@
-name: Build Windows GameTextReader V1.9 Luna original-config TTS experiment
+name: Build GameTextReader x64 with unmodified official LunaTranslator voice engine
 on:
   workflow_dispatch:
   push:
-    branches: ['exp/luna-original-config-embedded-tts-20261109']
+    branches: ['exp/luna-verbatim-upstream-20261109']
     paths:
       - 'game_reader/**'
       - 'diagnostics/**'
+      - 'docs/**'
       - 'native/**'
       - 'tools/**'
       - 'main.py'
@@ -56,8 +57,61 @@ jobs:
       - name: Build lean portable EXE folder
         shell: pwsh
         run: |
-          pyinstaller --clean --noconfirm --onedir --windowed --name GameTextReader --collect-data rapidocr --collect-binaries onnxruntime --collect-all winrt --collect-all tk_uia --collect-all azure.cognitiveservices.speech --hidden-import azure.cognitiveservices.speech --add-data 'models;models' main.py
+          pyinstaller --clean --noconfirm --onedir --windowed --name GameTextReader --collect-data rapidocr --collect-binaries onnxruntime --collect-all winrt --collect-all tk_uia --add-data 'models;models' main.py
           if (-not (Test-Path dist/GameTextReader/GameTextReader.exe)) { throw 'EXE missing' }
+      - name: Install exact unchanged author release and GPLv3 source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $releaseUrl = 'https://github.com/HIllya51/LunaTranslator/releases/download/v12.1.3.9/LunaTranslator_x64.zip'
+          $zip = Join-Path $env:RUNNER_TEMP 'official_LunaTranslator_v12.1.3.9.zip'
+          Invoke-WebRequest -Uri $releaseUrl -OutFile $zip
+          $sha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($sha -ne 'c0248288c12de19e9e1f953922355aaa123699820fce26e4e84329be2666d62f') {
+            throw 'Official Luna release hash mismatch; do not build from modified archive'
+          }
+          $unpack = Join-Path $env:RUNNER_TEMP 'Luna_Verbatim_Official'
+          Expand-Archive -Path $zip -DestinationPath $unpack -Force
+          $original = Join-Path $unpack 'LunaTranslator_x64/files/LunaSubprocess64.exe'
+          $exeSha = (Get-FileHash $original -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($exeSha -ne '886892cd78cdd8bbd029a3f4977853cc1ddce1c9723e656986fa8b5a79e6a974') {
+            throw 'Official unchanged LunaSubprocess64.exe SHA256 mismatch'
+          }
+          Copy-Item $original 'dist/GameTextReader/LunaSubprocess64.exe'
+          $targetSha = (Get-FileHash dist/GameTextReader/LunaSubprocess64.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($targetSha -ne $exeSha) { throw 'Copy modified the original Luna EXE' }
+          Write-Output "PASS ORIGINAL AUTHOR EXE: size=$((Get-Item $original).Length), SHA256=$exeSha"
+
+          $src = Join-Path $env:RUNNER_TEMP 'LunaTranslator_v12.1.3.9_original_source'
+          git clone --depth 1 --branch v12.1.3.9 --filter=blob:none https://github.com/HIllya51/LunaTranslator.git $src
+          if ($LASTEXITCODE -ne 0) { throw 'Official source clone failed' }
+          $commit = (git -C $src rev-parse HEAD).Trim()
+          if ($commit -ne '84677faeaa1e61bd7dd00b820090e9d2fe6c5142') {
+            throw "Source is not pinned upstream release tag: $commit"
+          }
+          New-Item -ItemType Directory 'dist/GameTextReader/upstream_luna_original' -Force | Out-Null
+          $sources = @{
+            'windowstts.py' = 'src/LunaTranslator/tts/windowstts.py'
+            'LunaSubProcess.py' = 'src/LunaTranslator/LunaSubProcess.py'
+            'basettsclass.py' = 'src/LunaTranslator/tts/basettsclass.py'
+            'msnaturalvoice.cpp' = 'src/NativeImpl/LunaSubprocess/msnaturalvoice.cpp'
+            'pipehost.hpp' = 'src/NativeImpl/LunaSubprocess/pipehost.hpp'
+            'LICENSE' = 'LICENSE'
+          }
+          foreach ($item in $sources.GetEnumerator()) {
+            $from = Join-Path $src $item.Value
+            $to = Join-Path 'dist/GameTextReader/upstream_luna_original' $item.Key
+            Copy-Item $from $to -Force
+            if ((Get-FileHash $from -Algorithm SHA256).Hash -ne (Get-FileHash $to -Algorithm SHA256).Hash) {
+              throw "Original author's source code was altered: $($item.Key)"
+            }
+          }
+          $dest = Join-Path (Resolve-Path 'dist/GameTextReader').Path 'UPSTREAM_LUNA_GPL_SOURCE_v12.1.3.9.zip'
+          git -C $src archive --format=zip --output=$dest HEAD
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $dest)) {
+            throw 'GPLv3 exact upstream source archive missing'
+          }
+          Write-Output 'PASS: exact original author executable and source archive are bundled'
       - name: Enable Microsoft C++ compiler
         uses: ilammy/msvc-dev-cmd@v1
       - name: Build independent Guangrong x64 voice host (NO vendor binaries)
@@ -132,18 +186,18 @@ jobs:
           if (($process.ExitCode -ne 0) -or (-not $report.StartsWith('PASS'))) {
             throw "Packaged speech API failed (exit=$($process.ExitCode))"
           }
-      - name: Verify frozen Luna original JSON fields reach embedded SDK and worker
+      - name: Verify frozen original JSON and unmodified official Luna engine handshake
         shell: pwsh
         run: |
           $testLog = Join-Path $env:TEMP 'GameTextReader_luna_selftest.txt'
           Remove-Item $testLog -Force -ErrorAction SilentlyContinue
           $exe = (Resolve-Path 'dist/GameTextReader/GameTextReader.exe').Path
           $process = Start-Process -FilePath $exe -ArgumentList '--self-test-luna' -Wait -PassThru
-          if (-not (Test-Path $testLog)) { throw 'Frozen Luna config did not generate a test report' }
+          if (-not (Test-Path $testLog)) { throw 'Frozen original Luna subprocess test did not generate a report' }
           $report = Get-Content $testLog -Raw
           Write-Output $report
           if (($process.ExitCode -ne 0) -or (-not $report.StartsWith('PASS'))) {
-            throw "Luna config+embedded SDK worker failed: $report"
+            throw "Original Luna executable/config/worker test failed: $report"
           }
           if (Test-Path 'dist/GameTextReader/config..json') {
             throw 'Private original user config must not be bundled'
@@ -161,7 +215,7 @@ jobs:
           if (($process.ExitCode -ne 0) -or (-not $report.StartsWith('PASS'))) {
             throw "Frozen UI/overlay test failed (exit=$($process.ExitCode))"
           }
-      - name: Launch full frozen V1.9 Tk application for startup verification
+      - name: Launch full frozen GameTextReader Tk application for startup verification
         shell: pwsh
         run: |
           $testLog = Join-Path $env:TEMP 'GameTextReader_app_selftest.txt'
@@ -172,7 +226,7 @@ jobs:
           $report = Get-Content $testLog -Raw
           Write-Output $report
           if (($process.ExitCode -ne 0) -or (-not $report.StartsWith('PASS'))) {
-            throw "Full V1.9 application startup failed (exit=$($process.ExitCode))"
+            throw "Full game reader application startup failed (exit=$($process.ExitCode))"
           }
       - name: Validate third-party Guangrong fallback has no bundled DLL
         shell: pwsh
@@ -250,9 +304,9 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory release -Force | Out-Null
-          Copy-Item docs/README_LUNA_EXPERIMENT.txt dist/GameTextReader/README_LUNA_EXPERIMENT.txt
-          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_V1.9_Luna_OriginalConfig_Windows_x64_Experimental.zip -CompressionLevel Optimal -Force
-          $size = (Get-Item release/GameTextReader_V1.9_Luna_OriginalConfig_Windows_x64_Experimental.zip).Length
+          Copy-Item docs/README_VERBATIM_LUNA.txt dist/GameTextReader/README_VERBATIM_LUNA.txt
+          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_V2.0_OriginalUnmodifiedLuna_Windows_x64_Portable.zip -CompressionLevel Optimal -Force
+          $size = (Get-Item release/GameTextReader_V2.0_OriginalUnmodifiedLuna_Windows_x64_Portable.zip).Length
           Write-Output "Portable archive size: $size bytes"
           Copy-Item dist/GameTextReader/BaoYiVoiceInspector_V2.exe release/BaoYiVoiceInspector_V2.exe
           Copy-Item diagnostics/README_V2.txt release/README_V2.txt
@@ -263,8 +317,8 @@ jobs:
           } finally { $v2zip.Dispose() }
       - uses: actions/upload-artifact@v4
         with:
-          name: GameTextReader-V1.9-Luna-OriginalConfig-Experimental
-          path: release/GameTextReader_V1.9_Luna_OriginalConfig_Windows_x64_Experimental.zip
+          name: GameTextReader-V2.0-Original-Unmodified-Luna-Portable
+          path: release/GameTextReader_V2.0_OriginalUnmodifiedLuna_Windows_x64_Portable.zip
           if-no-files-found: error
           retention-days: 30
       - uses: actions/upload-artifact@v4
