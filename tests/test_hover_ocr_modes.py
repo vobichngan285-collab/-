@@ -393,7 +393,10 @@ def test_f11_opens_picker_globally_and_window_switch_clears_old_ocr(monkeypatch)
     app._full_capture_window = 100
     calls = []
     app.select_region = lambda: calls.append("picker")
-    app.invalidate = lambda reason: calls.append("old-coords-cleared")
+    def invalidate(reason):
+        calls.append("old-coords-cleared")
+        app.lines = []
+    app.invalidate = invalidate
     app.status = lambda message: calls.append("unexpected")
     keys = {119: False, 120: False, 121: False, 122: True}
     monkeypatch.setattr(mod, "is_key_down", lambda vk: keys.get(vk, False))
@@ -401,4 +404,4 @@ def test_f11_opens_picker_globally_and_window_switch_clears_old_ocr(monkeypatch)
     app.poll_input()
     assert calls == ["picker", "old-coords-cleared"]
     app.poll_input()
-    assert calls == ["picker", "old-coords-cleared", "old-coords-cleared"]
+    assert calls == ["picker", "old-coords-cleared"]
