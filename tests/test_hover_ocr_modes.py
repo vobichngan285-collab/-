@@ -236,3 +236,46 @@ def test_real_tk_picker_opens_selects_and_cancels_on_windows():
         assert choices == [RelativeRegion(-332, -184, 580, 430), None]
     finally:
         root.destroy()
+
+
+def test_mode_key_first_press_normal_second_hover_third_normal():
+    class Fake:
+        def __init__(self):
+            self.values = []
+        def set(self, value):
+            self.values.append(value)
+        def reset(self):
+            self.values.append("reset")
+        def stop(self):
+            self.values.append("stop")
+        def play(self, name):
+            self.values.append(name)
+        def hide(self):
+            self.values.append("hide")
+
+    class FakeRoot:
+        def state(self):
+            return "iconic"
+
+    app = ReaderApp.__new__(ReaderApp)
+    app.root = FakeRoot()
+    app._mode_key_first_press = True
+    app.mouse_mode = "pointer"
+    app.mode_generation = 0
+    app._hover_last_text = ""
+    app.hover = Fake()
+    app.last_target = None
+    app.speech = Fake()
+    app.overlay = None
+    app.mouse_mode_var = Fake()
+    app.cues = Fake()
+    app.lines = []
+    app.status = lambda msg: None
+    app.update_output = lambda text: None
+    app.toggle_mouse_mode()
+    assert app.mouse_mode == "pointer"
+    app.toggle_mouse_mode()
+    assert app.mouse_mode == "hover"
+    app.toggle_mouse_mode()
+    assert app.mouse_mode == "pointer"
+    assert app.mode_generation == 3
