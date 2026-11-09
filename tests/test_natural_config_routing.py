@@ -112,3 +112,30 @@ def test_original_v12_small_core_and_reading_behavior_unchanged():
     assert "Det.limit_side_len" not in source
     assert "ModelType.SMALL" in source
     assert "use_cls=False" in source
+
+
+def test_worker_main_ignores_legacy_stdin_codepage_for_chinese_paths(
+        tmp_path, monkeypatch, capsys):
+    """Regression for Windows --windowed frozen worker defaulting to cp1252."""
+    import io
+    import sys
+    from game_reader.luna_voice_worker import main
+    config = tmp_path / "我的语音 配置 config.json"
+    config.write_text(json.dumps({
+        "MicrosoftWindows.Voice.License": "FAKE_TEST_ONLY"
+    }), encoding="utf-8")
+    request = json.dumps({"command": "check_config", "config_path": str(config)},
+                         ensure_ascii=False) + "\n"
+
+    class LegacyCodepageStdin:
+        encoding = "cp1252"
+        def __init__(self, binary):
+            self.buffer = io.BytesIO(binary)
+        def readline(self, *args):
+            raise AssertionError("Worker must use UTF-8 binary stdin, not cp1252 text")
+
+    monkeypatch.setattr(sys, "stdin", LegacyCodepageStdin(request.encode("utf-8")))
+    assert main() == 0
+    response = json.loads(capsys.readouterr().out)
+    assert response == {"ok": True, "stage": "config_read", "code": "ok"}
+    assert "FAKE_TEST_ONLY" not in str(response)
