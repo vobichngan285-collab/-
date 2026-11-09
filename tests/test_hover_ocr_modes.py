@@ -399,7 +399,7 @@ def test_f11_opens_picker_globally_and_window_switch_clears_old_ocr(monkeypatch)
     app._choosing_region = False
     app.setting_hotkey = False
     app.settings = {"vk": 119, "mode_vk": 120,
-                    "local_vk": 121, "pick_vk": 122, "period_ms": 500}
+                    "local_vk": 121, "pick_vk": 122, "clear_vk": 117, "period_ms": 500}
     app._hotkey_previous = {x: False for x in ("vk","mode_vk","local_vk","pick_vk","clear_vk")}
     app.expires_at = None
     app.mouse_mode = "pointer"
