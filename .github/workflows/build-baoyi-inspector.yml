@@ -1,0 +1,83 @@
+name: Build read-only BaoYi voice architecture inspector
+on:
+  workflow_dispatch:
+  push:
+    branches: ['experiment-baoyi-real-tts-inspector-*']
+    paths:
+      - 'diagnostics/BaoYiVoiceInspector.cs'
+      - 'diagnostics/README.txt'
+      - 'diagnostics/ProbeHost.cs'
+      - '.github/workflows/build-baoyi-inspector.yml'
+jobs:
+  inspector:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile accessible WinForms standalone EXE
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $csc = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+          if (-not (Test-Path $csc)) { throw 'Windows Framework compiler unavailable' }
+          New-Item -ItemType Directory out -Force | Out-Null
+          & $csc /nologo /target:winexe /platform:x64 /optimize+ /r:System.Windows.Forms.dll /r:System.Drawing.dll /out:out/BaoYiVoiceInspector.exe diagnostics/BaoYiVoiceInspector.cs
+          if ($LASTEXITCODE -ne 0) { throw "Inspector compile failed: $LASTEXITCODE" }
+          if (-not (Test-Path 'out/BaoYiVoiceInspector.exe')) { throw 'Inspector EXE missing' }
+          & $csc /nologo /target:exe /platform:x64 /out:"$env:RUNNER_TEMP/BoyPcReader_TestDummy.exe" diagnostics/ProbeHost.cs
+          if ($LASTEXITCODE -ne 0) { throw 'Simulated process compile failed' }
+      - name: Verify filters and sanitized user profile path
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $test = Join-Path $env:TEMP 'BaoYiVoiceInspector_test.txt'
+          Remove-Item $test -ErrorAction SilentlyContinue
+          $exepath = (Resolve-Path out/BaoYiVoiceInspector.exe).Path
+          $job = Start-Process $exepath -ArgumentList '--self-test' -Wait -PassThru
+          if ($job.ExitCode -ne 0 -or -not (Test-Path $test)) { throw 'Self-test did not complete' }
+          $result = Get-Content $test -Raw
+          Write-Output $result
+          if (-not $result.StartsWith('PASS')) { throw 'Self-test assertions failed' }
+      - name: Real process enumeration smoke test against harmless simulated app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $simulation = (Resolve-Path "$env:RUNNER_TEMP/BoyPcReader_TestDummy.exe").Path
+          $fake = Start-Process -FilePath $simulation -PassThru
+          try {
+            Start-Sleep -Seconds 1
+            $outlog = Join-Path $env:TEMP 'BaoYiVoiceInspector_ci_scan.txt'
+            Remove-Item $outlog -ErrorAction SilentlyContinue
+            $exepath = (Resolve-Path out/BaoYiVoiceInspector.exe).Path
+            $scan = Start-Process -FilePath $exepath -ArgumentList '--ci-scan' -PassThru -Wait
+            if ($scan.ExitCode -ne 0 -or -not (Test-Path $outlog)) { throw 'Read-only scan did not complete' }
+            $report = Get-Content $outlog -Raw -Encoding UTF8
+            if (-not $report.Contains('BoyPcReader_TestDummy.exe')) { throw 'Failed to find running BaoYi-like process' }
+            if (-not $report.Contains('扫描进程总数')) { throw 'Missing process count' }
+            if (-not $report.Contains('不读取朗读内容')) { throw 'Missing privacy warning' }
+            if ($env:USERPROFILE -and $report.Contains($env:USERPROFILE)) { throw 'User profile path leaked into report' }
+            Write-Output 'PASS: simulated process was discovered without admin/network/voice calls'
+          }
+          finally {
+            if ($fake -and -not $fake.HasExited) { Stop-Process -Id $fake.Id -Force -ErrorAction SilentlyContinue }
+          }
+      - name: Assemble read-only diagnostic ZIP only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Copy-Item diagnostics/README.txt out/README.txt
+          $all = Get-ChildItem out -File | Select-Object -ExpandProperty Name
+          if (@($all).Count -ne 2 -or -not ($all -contains 'BaoYiVoiceInspector.exe') -or -not ($all -contains 'README.txt')) { throw 'Unexpected output contents' }
+          if (Get-ChildItem out -Filter '*.dll') { throw 'No vendor DLL is allowed' }
+          Compress-Archive -Path out/BaoYiVoiceInspector.exe,out/README.txt -DestinationPath BaoYiVoiceInspector_Windows_x64_ReadOnly.zip -CompressionLevel Optimal -Force
+          $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path 'BaoYiVoiceInspector_Windows_x64_ReadOnly.zip').Path)
+          try {
+            if ($zip.Entries.Count -ne 2) { throw 'Unexpected ZIP entries' }
+          } finally { $zip.Dispose() }
+          Get-FileHash BaoYiVoiceInspector_Windows_x64_ReadOnly.zip -Algorithm SHA256 | Format-List
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BaoYiVoiceInspector-Windows-x64-ReadOnly
+          path: BaoYiVoiceInspector_Windows_x64_ReadOnly.zip
+          if-no-files-found: error
+          retention-days: 30
