@@ -30,8 +30,10 @@ from .cues import CuePlayer
 from .hover_modes import (MOUSE_SIDE_VKS, DEFAULT_REGION, RelativeRegion,
                           HOTKEY_FIELDS, HOTKEY_LABELS, hotkey_label,
                           valid_hotkey, sanitize_hotkeys, parse_period_ms,
-                          capture_box, normalized_text, next_mouse_mode)
+                          capture_box, normalized_text, next_mouse_mode,
+                          cursor_still_near_capture, exclude_unrelated_desktop_text)
 from .region_picker import ScreenRegionPicker
+from .foreground import foreground_class
 
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "GameTextReader"
 CONFIG_PATH = CONFIG_DIR / "settings.json"
@@ -39,6 +41,7 @@ ERROR_LOG = CONFIG_DIR / "last_ocr_error.txt"
 DEFAULTS = {"vk": 0x77, "hotkey_label": "F8",
             "mode_vk": 0x78, "mode_hotkey_label": "F9",
             "local_vk": 0x79, "local_hotkey_label": "F10",
+            "pick_vk": 0x7A, "pick_hotkey_label": "F11",
             "period_ms": 500, "region": list(DEFAULT_REGION),
             "tier": "small", "voice": "", "rate": 0,
             "volume": 100, "dwell_ms": 0, "luna_config": ""}
@@ -110,8 +113,13 @@ class ReaderApp:
         self.pending_full_capture = False
         self._region_picker = None
         self._choosing_region = False
+        self._region_previous_root_state = "normal"
+        self._hover_spoken_cursor = None
+        self._hover_spoken_foreground = None
+        self.last_voice_timing = "尚未测量"
         self.hover = HoverTracker(0)
-        self.speech = SpeechWorker(on_error=lambda e: self.events.put(("tts_error", e)))
+        self.speech = SpeechWorker(on_error=lambda e: self.events.put(("tts_error", e)),
+                                   on_event=lambda e: self.events.put(("tts_timing", e)))
         self.speech.set_luna_config(self.settings.get("luna_config", ""))
         self.speech.set_rate(self.settings["rate"])
         self.speech.set_volume(self.settings["volume"])
@@ -136,7 +144,7 @@ class ReaderApp:
         ttk.Label(p, text="游戏文字助手 · V1.2 Small + 双鼠标朗读模式",
                   font=("Microsoft YaHei UI", 16, "bold")).pack(anchor="w")
         ttk.Label(p, text="F8 全屏 OCR，F9 切换鼠标指向／悬停识别，F10 手动局部 OCR。"
-                  "三个快捷键均可自定义单键，或两枚标准鼠标侧键。",
+                  "F11 全局暗屏框选；四个快捷键均可自定义单键或鼠标侧键。",
                   wraplength=690).pack(anchor="w", pady=(2, 8))
         keys = ttk.LabelFrame(p, text="截图热键", padding=8)
         keys.pack(fill="x", pady=3)
@@ -160,6 +168,15 @@ class ReaderApp:
             mode_row, text=self.settings["local_hotkey_label"], width=18,
             command=lambda: self.begin_hotkey("local_vk"))
         self.local_key_button.pack(side="left", padx=5)
+        pick_row = ttk.Frame(modes)
+        pick_row.pack(fill="x", pady=(4, 0))
+        ttk.Label(pick_row, text="随时框选快捷键").pack(side="left")
+        self.pick_key_button = ttk.Button(
+            pick_row, text=self.settings["pick_hotkey_label"], width=18,
+            command=lambda: self.begin_hotkey("pick_vk"))
+        self.pick_key_button.pack(side="left", padx=6)
+        ttk.Label(pick_row, text="任何页面按一下即可暗屏框选；Esc 取消").pack(
+            side="left", padx=6)
         self.mouse_mode_var = tk.StringVar(
             value=f'当前：默认鼠标指向朗读（{self.settings["mode_hotkey_label"]} 首次确认默认模式）')
         ttk.Label(modes, textvariable=self.mouse_mode_var,
@@ -279,6 +296,7 @@ class ReaderApp:
                 (self.key_button, "设置键盘或鼠标侧键全屏截图快捷键"),
                 (self.mode_key_button, "设置键盘或鼠标侧键切换朗读模式"),
                 (self.local_key_button, "设置键盘或鼠标侧键手动局部 OCR"),
+                (self.pick_key_button, "设置全局暗屏框选快捷键"),
                 (self.period_entry, "局部 OCR 自动刷新毫秒间隔"),
                 (self.pick_region_button, "暗屏框选鼠标跟随 OCR 区域"),
                 (self.voice_select, "选择本地 TTS 声音"),
@@ -327,7 +345,8 @@ class ReaderApp:
 
     def _hotkey_button(self, field: str):
         return {"vk": self.key_button, "mode_vk": self.mode_key_button,
-                "local_vk": self.local_key_button}[field]
+                "local_vk": self.local_key_button,
+                "pick_vk": self.pick_key_button}[field]
 
     def finish_hotkey(self):
         target = self._binding_target
@@ -399,6 +418,12 @@ class ReaderApp:
         self.status(f"悬停 OCR 周期已设为 {period} 毫秒。")
 
     def select_region(self):
+        """Global F11 can open a picker while an unrelated game is foreground.
+
+        Keep root technically viewable but invisible. Tk child Toplevels of
+        withdrawn/minimized roots can fail to map on Windows, which caused
+        'works once, never again'. Restore the exact previous root state.
+        """
         if self._choosing_region or self.closed:
             return
         if self.setting_hotkey:
@@ -409,8 +434,15 @@ class ReaderApp:
             self.status("无法获取显示器尺寸：" + type(exc).__name__)
             return
         self._choosing_region = True
-        self.root.withdraw()
-        self.root.after(180, lambda: self._open_region_picker(monitor))
+        self._region_previous_root_state = self.root.state()
+        try:
+            self.root.deiconify()
+            self.root.attributes("-alpha", 0.0)
+            self.root.update_idletasks()
+            self.root.after(10, lambda: self._open_region_picker(monitor))
+        except tk.TclError:
+            self._region_picked(None)
+            self.status("无法进入暗屏框选；窗口状态恢复。")
 
     def _open_region_picker(self, monitor):
         if self.closed or not self._choosing_region:
@@ -420,6 +452,7 @@ class ReaderApp:
                 self.root, monitor,
                 RelativeRegion.from_settings(self.settings["region"]),
                 self._region_picked)
+            self._region_picker.lift()
         except Exception as exc:
             self._region_picked(None)
             self.status("暗屏框选初始化失败：" + type(exc).__name__)
@@ -429,16 +462,23 @@ class ReaderApp:
         self._choosing_region = False
         if self.closed:
             return
-        self.root.deiconify()
-        self.root.lift()
+        try:
+            self.root.attributes("-alpha", 1.0)
+            if self._region_previous_root_state in ("iconic", "withdrawn"):
+                self.root.iconify()
+            else:
+                self.root.deiconify()
+        except tk.TclError:
+            pass
         if region is None:
             self.status("框选已取消，原识别区域未改变。")
         else:
             self.settings["region"] = region.as_list()
             self.region_info_var.set(self.format_region(region))
             self._hover_last_text = ""
+            self._hover_spoken_cursor = None
             self.persist()
-            self.status("已保存相对鼠标的局部 OCR 区域；切换到悬停模式后生效。")
+            self.status("已保存鼠标跟随区域；按 F11 或自定义键可以随时重新框选。")
         self._hover_next_due = time.monotonic() + self.settings["period_ms"] / 1000.0
 
     def toggle_mouse_mode(self):
