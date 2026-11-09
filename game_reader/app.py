@@ -45,7 +45,9 @@ DEFAULTS = {"vk": 0x77, "hotkey_label": "F8",
             "mode_vk": 0x78, "mode_hotkey_label": "F9",
             "local_vk": 0x79, "local_hotkey_label": "F10",
             "pick_vk": 0x7A, "pick_hotkey_label": "F11",
+            "clear_vk": 0x75, "clear_hotkey_label": "F6",
             "period_ms": 500, "region": list(DEFAULT_REGION),
+            "success_cue": True,
             "tier": "small", "voice": "", "rate": 0,
             "volume": 100, "dwell_ms": 0, "luna_config": "",
             **DEFAULT_FILTER_SETTINGS}
@@ -66,8 +68,7 @@ def read_settings() -> dict:
         settings["period_ms"] = parse_period_ms(settings["period_ms"])
     except ValueError:
         settings["period_ms"] = 500
-    settings["region"] = centered_region(
-        RelativeRegion.from_settings(settings["region"])).as_list()
+    settings["region"] = RelativeRegion.from_settings(settings["region"]).as_list()
     settings["tier"] = "small"
     settings["dwell_ms"] = 0
     try:
@@ -128,6 +129,11 @@ class ReaderApp:
         self._region_picker = None
         self._choosing_region = False
         self._region_previous_root_state = "normal"
+        self._picker_anchor = None
+        self._picker_monitor = None
+        self._picker_snapshot = None
+        self._picker_foreground = None
+        self._ocr_lock = threading.Lock()  # Never run concurrent work in RapidOCR.
         self._hover_spoken_cursor = None
         self._hover_spoken_foreground = None
         self.last_voice_timing = "尚未测量"
@@ -265,7 +271,7 @@ class ReaderApp:
             command=lambda: self.begin_hotkey("pick_vk"))
         self.pick_key_button.pack(side="left", padx=(12, 12))
         self.pick_region_button = ttk.Button(
-            pick_row, text="暗屏框选宽高", command=self.select_region)
+            pick_row, text="鼠标起点自由框选并识别", command=self.select_region)
         self.pick_region_button.pack(side="left")
         self.show_frame_var = tk.BooleanVar(value=self.settings["show_scan_frame"])
         self.show_frame_check = ttk.Checkbutton(
@@ -378,7 +384,18 @@ class ReaderApp:
             full_frame, text="立即截屏识别", style="Accent.TButton",
             command=self.capture_from_button)
         self.read_btn.pack(anchor="w", pady=(16, 8))
-        note(full_frame, "鼠标默认模式使用 F8 截图中识别的文字坐标；结果保留 60 秒。")
+        clear_row = row(full_frame)
+        card_label(clear_row, "手动清空 OCR 结果").pack(side="left")
+        self.clear_key_button = ttk.Button(
+            clear_row, text=self.settings["clear_hotkey_label"], width=16,
+            command=lambda: self.begin_hotkey("clear_vk"))
+        self.clear_key_button.pack(side="left", padx=(18, 0))
+        self.success_cue_var = tk.BooleanVar(value=self.settings["success_cue"])
+        self.success_cue_check = ttk.Checkbutton(
+            full_frame, text="识别到文字且可朗读时播放清脆叮声",
+            variable=self.success_cue_var, command=self.save_visual_settings)
+        self.success_cue_check.pack(anchor="w", pady=(6, 0))
+        note(full_frame, "默认模式结果保留 60 秒；清除键可以更换为其他不冲突的单键。")
 
         filtering = self._pages["filters"]
         filter_frame = section(filtering, "朗读内容过滤")
@@ -462,6 +479,7 @@ class ReaderApp:
     def save_visual_settings(self):
         for name, variable in (
             ("show_scan_frame", self.show_frame_var),
+            ("success_cue", self.success_cue_var),
             ("mode_voice_hint", self.mode_voice_var),
             ("similarity_enabled", self.similarity_enabled_var),
             ("filter_english", self.filter_english_var),
@@ -531,14 +549,16 @@ class ReaderApp:
                 (self.reset_mouse_button, "恢复鼠标设置默认值，不清除语音授权"),
                 (self.mode_key_button, "切换默认模式和鼠标模式的快捷键"),
                 (self.local_key_button, "立即识别鼠标附近文字的快捷键"),
-                (self.pick_key_button, "全局暗屏调整鼠标扫描宽高的快捷键"),
+                (self.pick_key_button, "全局从鼠标位置开始自由拖框的快捷键"),
+                (self.clear_key_button, "手动立即清空识别结果的快捷键"),
+                (self.success_cue_check, "识别有效文字后播放清脆叮声，开关"),
                 (self.period_entry, "鼠标局部 OCR 周期，单位毫秒"),
                 (self.period_save_button, "保存局部 OCR 周期"),
                 (self.similarity_check, "启用重复文本相似度过滤"),
                 (self.similarity_spin, "文本相似度阈值零到八"),
                 (self.show_frame_check, "显示跟随鼠标的绿色扫描框"),
                 (self.mode_voice_check, "切换模式时说出鼠标模式或默认模式"),
-                (self.pick_region_button, "暗屏框选扫描区域"),
+                (self.pick_region_button, "从鼠标当前位置暗屏拖框并立即识别"),
                 (self.voice_select, "选择本机微软云希晓晓或其他语音"),
                 (self.rescan_button, "重新扫描本机语音"),
                 (self.preview_button, "试听当前选中语音"),
@@ -607,7 +627,8 @@ class ReaderApp:
     def _hotkey_button(self, field: str):
         return {"vk": self.key_button, "mode_vk": self.mode_key_button,
                 "local_vk": self.local_key_button,
-                "pick_vk": self.pick_key_button}[field]
+                "pick_vk": self.pick_key_button,
+                "clear_vk": self.clear_key_button}[field]
 
     def finish_hotkey(self):
         target = self._binding_target
@@ -664,8 +685,9 @@ class ReaderApp:
 
     @staticmethod
     def format_region(region: RelativeRegion) -> str:
-        return (f"鼠标居中扫描：{region.width} × {region.height} 像素；"
-                "F11 或设置按钮可调整扫描范围大小。")
+        return (f"鼠标相对扫描：{region.width} × {region.height} 像素；"
+                f"水平偏移 {region.x:+d}，垂直偏移 {region.y:+d}。"
+                "按 F11 从当前鼠标位置任意方向拉框，松开立即识别。")
 
     def save_period(self):
         try:
