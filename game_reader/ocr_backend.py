@@ -1,4 +1,4 @@
-"""Offline PP-OCRv6 hybrid OCR with latency-limited Small detection and per-tier recognition."""
+"""Offline PP-OCRv6 Small DET + Small REC (single supported OCR engine)."""
 from __future__ import annotations
 import math
 import sys
@@ -9,16 +9,10 @@ from pathlib import Path
 import numpy as np
 from .core import OCRLine
 
-# V1.4: The old full Medium detector caused multi-second F8 stalls.
-# Use the proven Small detector for BOTH tiers, then Medium recognition only
-# for the accuracy-oriented tier. This is a deliberate hybrid, not a full
-# Medium detector disguised under the old label.
-TIERS = {
-    "small": ("PP-OCRv6_det_small.onnx", "PP-OCRv6_rec_small.onnx"),
-    "medium": ("PP-OCRv6_det_small.onnx", "PP-OCRv6_rec_medium.onnx"),
-}
-DET_LONG_SIDE = {"small": 1280, "medium": 1152}
-
+# V1.8 removes Medium; preserve the proven Small model, detection resolution,
+# RapidOCR defaults and mouse-coordinate mapping unchanged.
+TIERS = {"small": ("PP-OCRv6_det_small.onnx", "PP-OCRv6_rec_small.onnx")}
+DET_LONG_SIDE = {"small": 1280}
 
 
 def model_root() -> Path:
@@ -56,79 +50,53 @@ def _milliseconds(start: float) -> int:
 
 
 class LocalOCR:
-    """A single cached model pair: no duplicate medium/small memory residency.
+    """Cache the sole Small model pair and perform optional background warmup."""
 
-    Preload the selected tier in a background thread before the first F8. Model
-    switch replaces it; one lock keeps prewarm and recognition from racing.
-    """
-    def __init__(self, medium_rec_batch_num: int = 2,
-                 medium_ort_threads: int | None = 2):
-        # Only Medium REC batching is experimental. Small retains RapidOCR
-        # defaults for a stable baseline and rapid F8 response.
-        if not 1 <= medium_rec_batch_num <= 6:
-            raise ValueError("Medium REC batch size must be between 1 and 6")
-        self.medium_rec_batch_num = medium_rec_batch_num
-        if medium_ort_threads not in (None, 1, 2, 4, 8):
-            raise ValueError("Unsupported Medium ONNX CPU thread profile")
-        self.medium_ort_threads = medium_ort_threads
+    def __init__(self):
         self.loaded_tier: str | None = None
         self.engine = None
         self._warmed = False
         self._lock = threading.RLock()
 
     def _load(self, tier: str) -> None:
-        if tier not in TIERS:
-            raise ValueError("Unsupported OCR tier")
+        if tier != "small":
+            raise ValueError("V1.8 supports PP-OCRv6 Small only")
         if self.engine is not None and self.loaded_tier == tier:
             return
         from rapidocr import RapidOCR, ModelType, EngineType, OCRVersion
-        det, rec = (model_root() / name for name in TIERS[tier])
+        det, rec = (model_root() / name for name in TIERS["small"])
         for path in (det, rec):
             if not path.is_file() or path.stat().st_size < 100000:
                 raise FileNotFoundError(f"缺少或损坏的离线 OCR 文件：{path}")
-        params = {
+        self.engine = RapidOCR(params={
             "Det.engine_type": EngineType.ONNXRUNTIME,
             "Rec.engine_type": EngineType.ONNXRUNTIME,
             "Det.ocr_version": OCRVersion.PPOCRV6,
             "Rec.ocr_version": OCRVersion.PPOCRV6,
             "Det.model_type": ModelType.SMALL,
-            # Avoid upscale-by-short-edge ('min') of a wide game screenshot:
-            # cap the detector's LONGEST side at this tier's pixel budget.
-            # RapidOCR maps detected boxes back to input image coordinates.
             "Det.limit_type": "max",
-            "Det.limit_side_len": DET_LONG_SIDE[tier],
-            "Rec.model_type": (ModelType.SMALL if tier == "small" else ModelType.MEDIUM),
+            "Det.limit_side_len": DET_LONG_SIDE["small"],
+            "Rec.model_type": ModelType.SMALL,
             "Det.model_path": str(det),
             "Rec.model_path": str(rec),
-        }
-        if tier == "medium":
-            params["Rec.rec_batch_num"] = self.medium_rec_batch_num
-            if self.medium_ort_threads is not None:
-                # Trial-only setting; leaves the Small OCR session unchanged.
-                params["EngineConfig.onnxruntime.intra_op_num_threads"] = self.medium_ort_threads
-        engine = RapidOCR(params=params)
-        self.engine = engine
-        self.loaded_tier = tier
+        })
+        self.loaded_tier = "small"
         self._warmed = False
 
     def prepare(self, tier: str, still_current=None) -> int | None:
-        """Warm selected tier only; abandon outdated queued warmup tasks.
-
-        Callback is checked before and after acquiring the OCR lock. A warmup
-        already running in ONNX cannot be interrupted safely.
-        """
+        """Warm only while the operation is current; never block F8 with stale work."""
+        if tier != "small":
+            raise ValueError("Unsupported OCR tier")
         started = time.perf_counter()
         if still_current is not None and not still_current():
             return None
         with self._lock:
             if still_current is not None and not still_current():
                 return None
-            self._load(tier)
+            self._load("small")
             if still_current is not None and not still_current():
                 return None
             if not self._warmed:
-                # RapidOCR 3.10 lazily loads recognition ONLY when it sees
-                # real text. A blank frame would warm DET but not REC.
                 from PIL import Image, ImageDraw, ImageFont
                 sample = Image.new("RGB", (580, 180), "white")
                 draw = ImageDraw.Draw(sample)
@@ -142,13 +110,13 @@ class LocalOCR:
         return _milliseconds(started)
 
     def recognize_timed(self, image, origin: tuple[int, int], tier: str):
+        if tier != "small":
+            raise ValueError("V1.8 supports PP-OCRv6 Small only")
         start = time.perf_counter()
         with self._lock:
-            # Separate waiting behind background prewarm from model loading.
-            # Keep model_ms stable for the existing UI/log consumers.
-            model_lock_wait_ms = _milliseconds(start)
+            lock_wait_ms = _milliseconds(start)
             load_started = time.perf_counter()
-            self._load(tier)
+            self._load("small")
             model_load_ms = _milliseconds(load_started)
             model_ms = _milliseconds(start)
             t0 = time.perf_counter()
@@ -164,12 +132,11 @@ class LocalOCR:
         raw = getattr(result, "txts", None)
         result_detail = getattr(result, "elapse_list", None)
         return lines, {
-            "tier": tier,
+            "tier": "small",
             "model_ms": model_ms,
-            "model_lock_wait_ms": model_lock_wait_ms,
+            "model_lock_wait_ms": lock_wait_ms,
             "model_load_ms": model_load_ms,
-            "rec_batch_num": self.medium_rec_batch_num if tier == "medium" else 6,
-            "medium_ort_threads": self.medium_ort_threads if tier == "medium" else None,
+            "rec_batch_num": 6,
             "convert_ms": convert_ms,
             "inference_ms": inference_ms,
             "parse_ms": parse_ms,
@@ -177,8 +144,8 @@ class LocalOCR:
             "accepted_lines": len(lines),
             "engine_stages": str(result_detail) if result_detail is not None else "n/a",
             "detector": "PP-OCRv6 Small",
-            "recognizer": f"PP-OCRv6 {tier.capitalize()}",
-            "det_max_side": DET_LONG_SIDE[tier],
+            "recognizer": "PP-OCRv6 Small",
+            "det_max_side": DET_LONG_SIDE["small"],
         }
 
     def recognize(self, image, origin: tuple[int, int], tier: str) -> list[OCRLine]:
