@@ -140,7 +140,7 @@ class ReaderApp:
                                            variable=self.tier_var, value="small",
                                            command=self.change_model)
         self.small_radio.pack(anchor="w")
-        self.medium_radio = ttk.Radiobutton(models, text="Medium 识别优先 · Small 定位 + Medium 识字（批2实验）",
+        self.medium_radio = ttk.Radiobutton(models, text="Medium 识别优先 · Small 定位 + Medium 识字（批2/CPU2实验）",
                                             variable=self.tier_var, value="medium",
                                             command=self.change_model)
         self.medium_radio.pack(anchor="w")
