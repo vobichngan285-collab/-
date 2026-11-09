@@ -221,16 +221,25 @@ def packaged_guangrong_loader_selftest() -> int:
     output = Path(gettempdir()) / "GameTextReader_guangrong_loader_selftest.txt"
     try:
         from game_reader.guangrong_tts import list_guangrong_voices
+        import os
         with TemporaryDirectory(prefix="grtts-frozen-probe-") as d:
             invalid = Path(d) / "grtts_x64.dll"
+            trace = Path(d) / "child-trace.txt"
             invalid.write_bytes(b"This is deliberately not a real DLL")
-            voices, error = list_guangrong_voices(str(invalid), timeout=15)
+            os.environ["GR_NATIVE_DEBUG_FILE"] = str(trace)
+            try:
+                voices, error = list_guangrong_voices(str(invalid), timeout=15)
+            finally:
+                os.environ.pop("GR_NATIVE_DEBUG_FILE", None)
+            trace_text = trace.read_text(encoding="utf-8") if trace.exists() else "<NO CHILD TRACE>"
             if voices:
                 raise AssertionError("Invalid vendor library unexpectedly returned voices")
             if "WinError 193" not in error:
-                raise AssertionError("Expected native architecture error, got: " + error)
+                raise AssertionError("Expected native error, got: " + error
+                                     + "\\nChild stages: " + trace_text)
             if "PyInstallerImportError" in error:
-                raise AssertionError("PyInstaller loader hook still intercepted the native call")
+                raise AssertionError("PyInstaller hook still intercepted call")
+
         output.write_text("PASS\nFrozen child native loader returned WinError 193 without confusing PyInstaller errors", encoding="utf-8")
         return 0
     except BaseException:
