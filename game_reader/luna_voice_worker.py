@@ -18,10 +18,7 @@ MAX_TEXT = 2000
 MAX_AUDIO = 16 * 1024 * 1024
 
 
-class VoiceSetupError(Exception):
-    def __init__(self, code: str):
-        self.code = code
-        super().__init__(code)
+from .natural_voice_errors import VoiceSetupError
 
 
 def synthesize_with_installed_voice(config_path: str, voice_id: str, text: str, speed=0) -> bytes:
