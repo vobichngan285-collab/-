@@ -1,8 +1,8 @@
-name: Build Windows GameTextReader V1.8 Small OCR + BaoYi Voice Probe V2
+name: Build Windows GameTextReader V1.9 Luna original-config TTS experiment
 on:
   workflow_dispatch:
   push:
-    branches: ['game-text-reader-*', 'feat/windows-v18-small-only-baoyi-voice-probe-20261109']
+    branches: ['exp/luna-original-config-embedded-tts-20261109']
     paths:
       - 'game_reader/**'
       - 'diagnostics/**'
@@ -56,7 +56,7 @@ jobs:
       - name: Build lean portable EXE folder
         shell: pwsh
         run: |
-          pyinstaller --clean --noconfirm --onedir --windowed --name GameTextReader --collect-data rapidocr --collect-binaries onnxruntime --collect-all winrt --collect-all tk_uia --add-data 'models;models' main.py
+          pyinstaller --clean --noconfirm --onedir --windowed --name GameTextReader --collect-data rapidocr --collect-binaries onnxruntime --collect-all winrt --collect-all tk_uia --collect-all azure.cognitiveservices.speech --hidden-import azure.cognitiveservices.speech --add-data 'models;models' main.py
           if (-not (Test-Path dist/GameTextReader/GameTextReader.exe)) { throw 'EXE missing' }
       - name: Enable Microsoft C++ compiler
         uses: ilammy/msvc-dev-cmd@v1
@@ -132,6 +132,22 @@ jobs:
           if (($process.ExitCode -ne 0) -or (-not $report.StartsWith('PASS'))) {
             throw "Packaged speech API failed (exit=$($process.ExitCode))"
           }
+      - name: Verify frozen Luna original JSON fields reach embedded SDK and worker
+        shell: pwsh
+        run: |
+          $testLog = Join-Path $env:TEMP 'GameTextReader_luna_selftest.txt'
+          Remove-Item $testLog -Force -ErrorAction SilentlyContinue
+          $exe = (Resolve-Path 'dist/GameTextReader/GameTextReader.exe').Path
+          $process = Start-Process -FilePath $exe -ArgumentList '--self-test-luna' -Wait -PassThru
+          if (-not (Test-Path $testLog)) { throw 'Frozen Luna config did not generate a test report' }
+          $report = Get-Content $testLog -Raw
+          Write-Output $report
+          if (($process.ExitCode -ne 0) -or (-not $report.StartsWith('PASS'))) {
+            throw "Luna config+embedded SDK worker failed: $report"
+          }
+          if (Test-Path 'dist/GameTextReader/config..json') {
+            throw 'Private original user config must not be bundled'
+          }
       - name: Test packaged UI Automation and click-through frame
         shell: pwsh
         run: |
@@ -145,7 +161,7 @@ jobs:
           if (($process.ExitCode -ne 0) -or (-not $report.StartsWith('PASS'))) {
             throw "Frozen UI/overlay test failed (exit=$($process.ExitCode))"
           }
-      - name: Launch full frozen V1.8 Tk application for startup verification
+      - name: Launch full frozen V1.9 Tk application for startup verification
         shell: pwsh
         run: |
           $testLog = Join-Path $env:TEMP 'GameTextReader_app_selftest.txt'
@@ -156,7 +172,7 @@ jobs:
           $report = Get-Content $testLog -Raw
           Write-Output $report
           if (($process.ExitCode -ne 0) -or (-not $report.StartsWith('PASS'))) {
-            throw "Full V1.8 application startup failed (exit=$($process.ExitCode))"
+            throw "Full V1.9 application startup failed (exit=$($process.ExitCode))"
           }
       - name: Validate third-party Guangrong fallback has no bundled DLL
         shell: pwsh
@@ -234,8 +250,9 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory release -Force | Out-Null
-          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_V1.8_Small_TTSProbe_Windows_x64_Portable.zip -CompressionLevel Optimal -Force
-          $size = (Get-Item release/GameTextReader_V1.8_Small_TTSProbe_Windows_x64_Portable.zip).Length
+          Copy-Item docs/README_LUNA_EXPERIMENT.txt dist/GameTextReader/README_LUNA_EXPERIMENT.txt
+          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_V1.9_Luna_OriginalConfig_Windows_x64_Experimental.zip -CompressionLevel Optimal -Force
+          $size = (Get-Item release/GameTextReader_V1.9_Luna_OriginalConfig_Windows_x64_Experimental.zip).Length
           Write-Output "Portable archive size: $size bytes"
           Copy-Item dist/GameTextReader/BaoYiVoiceInspector_V2.exe release/BaoYiVoiceInspector_V2.exe
           Copy-Item diagnostics/README_V2.txt release/README_V2.txt
@@ -246,8 +263,8 @@ jobs:
           } finally { $v2zip.Dispose() }
       - uses: actions/upload-artifact@v4
         with:
-          name: GameTextReader-V1.8-Small-TTSProbe-Portable
-          path: release/GameTextReader_V1.8_Small_TTSProbe_Windows_x64_Portable.zip
+          name: GameTextReader-V1.9-Luna-OriginalConfig-Experimental
+          path: release/GameTextReader_V1.9_Luna_OriginalConfig_Windows_x64_Experimental.zip
           if-no-files-found: error
           retention-days: 30
       - uses: actions/upload-artifact@v4
