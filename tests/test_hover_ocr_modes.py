@@ -241,7 +241,7 @@ def test_real_tk_picker_opens_selects_and_cancels_on_windows():
         root.destroy()
 
 
-def test_mode_key_first_press_normal_second_hover_third_normal():
+def test_every_mode_key_press_switches_immediately_first_hover_second_pointer():
     class Fake:
         def __init__(self):
             self.values = []
@@ -262,7 +262,6 @@ def test_mode_key_first_press_normal_second_hover_third_normal():
 
     app = ReaderApp.__new__(ReaderApp)
     app.root = FakeRoot()
-    app._mode_key_first_press = True
     app.mouse_mode = "pointer"
     app.mode_generation = 0
     app._hover_last_text = ""
@@ -276,11 +275,11 @@ def test_mode_key_first_press_normal_second_hover_third_normal():
     app.status = lambda msg: None
     app.update_output = lambda text: None
     app.toggle_mouse_mode()
-    assert app.mouse_mode == "pointer"
-    app.toggle_mouse_mode()
     assert app.mouse_mode == "hover"
     app.toggle_mouse_mode()
     assert app.mouse_mode == "pointer"
+    app.toggle_mouse_mode()
+    assert app.mouse_mode == "hover"
     assert app.mode_generation == 3
 
 
