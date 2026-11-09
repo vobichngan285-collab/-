@@ -144,7 +144,8 @@ def test_hotkey_assignment_refuses_duplicates_and_records_side_button():
     app = ReaderApp.__new__(ReaderApp)
     app.settings = {"vk": 119, "hotkey_label": "F8",
                     "mode_vk": 120, "mode_hotkey_label": "F9",
-                    "local_vk": 121, "local_hotkey_label": "F10"}
+                    "local_vk": 121, "local_hotkey_label": "F10",
+                    "pick_vk": 122, "pick_hotkey_label": "F11"}
     app._binding_target = "mode_vk"
     app.mouse_mode = "hover"
     app._hotkey_previous = {}
@@ -176,8 +177,10 @@ def test_global_key_poll_handles_side_hotkeys_once_per_press(monkeypatch):
     app.closed = False
     app._choosing_region = False
     app.setting_hotkey = False
-    app.settings = {"vk": 119, "mode_vk": 5, "local_vk": 6, "period_ms": 500}
-    app._hotkey_previous = {"vk": False, "mode_vk": False, "local_vk": False}
+    app.settings = {"vk": 119, "mode_vk": 5, "local_vk": 6,
+                    "pick_vk": 122, "period_ms": 500}
+    app._hotkey_previous = {"vk": False, "mode_vk": False, "local_vk": False,
+                            "pick_vk": False}
     app.expires_at = None
     app.mouse_mode = "pointer"
     app.lines = []
@@ -279,3 +282,84 @@ def test_mode_key_first_press_normal_second_hover_third_normal():
     app.toggle_mouse_mode()
     assert app.mouse_mode == "pointer"
     assert app.mode_generation == 3
+
+
+def test_f11_global_picker_has_separate_hotkey_and_does_not_conflict():
+    from game_reader.hover_modes import HOTKEY_FIELDS, HOTKEY_DEFAULTS, sanitize_hotkeys
+    assert HOTKEY_FIELDS == ("vk", "mode_vk", "local_vk", "pick_vk")
+    d = sanitize_hotkeys({"vk": 119, "mode_vk": 120,
+                          "local_vk": 121, "pick_vk": 122})
+    assert [d[k] for k in HOTKEY_FIELDS] == list(HOTKEY_DEFAULTS)
+
+
+def test_stale_hover_crop_is_rejected_when_cursor_moves_or_foreground_changes(monkeypatch):
+    import game_reader.app as mod
+    app = fake_reader_for_hover_results()
+    app._hover_spoken_cursor = None
+    monkeypatch.setattr(mod, "get_cursor", lambda: (900, 550))
+    monkeypatch.setattr(mod, "foreground_class", lambda: "GameWindow")
+    old_text = [OCRLine("回收站", 20, 20, 120, 45)]
+    app._handle_hover_result(3, old_text, False, 40,
+                             (200, 300), "GameWindow")
+    assert app.spoken_values == []
+    assert app._hover_last_text == ""
+    app._handle_hover_result(3, old_text, False, 40,
+                             (900, 550), "Progman")
+    assert app.spoken_values == []
+    app._handle_hover_result(3, [OCRLine("制作技能", 400, 350, 550, 380)],
+                             False, 40, (901, 551), "GameWindow")
+    assert app.spoken_values == ["制作技能"]
+
+
+def test_windows_desktop_icons_are_never_read_as_game_tooltips():
+    from game_reader.hover_modes import (
+        cursor_still_near_capture, exclude_unrelated_desktop_text,
+    )
+    assert exclude_unrelated_desktop_text("Progman")
+    assert exclude_unrelated_desktop_text("WorkerW")
+    assert exclude_unrelated_desktop_text("Shell_TrayWnd")
+    assert not exclude_unrelated_desktop_text("GameWindow")
+    assert cursor_still_near_capture((100, 200), (120, 220))
+    assert not cursor_still_near_capture((100, 200), (800, 220))
+
+
+def test_global_picker_reopens_repeatedly_after_cancel_on_real_windows(monkeypatch):
+    import sys
+    if sys.platform != "win32":
+        pytest.skip("Real Windows Tk window lifecycle")
+    import tkinter as tk
+    import game_reader.app as mod
+
+    root = tk.Tk()
+    root.geometry("500x400")
+    root.update()
+    app = ReaderApp.__new__(ReaderApp)
+    app.root = root
+    app.closed = False
+    app.setting_hotkey = False
+    app._choosing_region = False
+    app._region_picker = None
+    app._region_previous_root_state = "normal"
+    app._hover_last_text = ""
+    app.settings = {"region": [-300, -140, 600, 400], "period_ms": 500}
+    app.region_info_var = tk.StringVar(master=root, value="old")
+    app.status = lambda message: None
+    app.persist = lambda: None
+    monkeypatch.setattr(mod, "monitor_rect_at_cursor", lambda: (0, 0, 1024, 768))
+    try:
+        for _ in range(3):
+            app.select_region()
+            root.after(50, lambda: None)
+            import time
+            time.sleep(0.07)
+            root.update()
+            picker = app._region_picker
+            assert picker is not None, "Picker failed to reopen"
+            assert picker.winfo_exists()
+            picker.cancel()
+            root.update()
+            assert not app._choosing_region
+            assert app._region_picker is None
+            assert float(root.attributes("-alpha")) == pytest.approx(1.0)
+    finally:
+        root.destroy()
