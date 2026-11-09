@@ -1,10 +1,11 @@
-name: Build Windows game text reader V1.7 Medium CPU2 final experiment
+name: Build Windows GameTextReader V1.8 Small OCR + BaoYi Voice Probe V2
 on:
   workflow_dispatch:
   push:
-    branches: ['game-text-reader-*', 'exp/windows-medium-latency-v17-20261109']
+    branches: ['game-text-reader-*', 'feat/windows-v18-small-only-baoyi-voice-probe-20261109']
     paths:
       - 'game_reader/**'
+      - 'diagnostics/**'
       - 'native/**'
       - 'tools/**'
       - 'main.py'
@@ -40,39 +41,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'A unit test failed; packaging is forbidden' }
           python -m compileall -q main.py game_reader
           if ($LASTEXITCODE -ne 0) { throw 'Source compileall failed' }
-      - name: Prepare official PP-OCRv6 Small and Medium ONNX weights
+      - name: Prepare only official PP-OCRv6 Small DET + REC weights
         shell: pwsh
         run: |
           python prepare_models.py
-      - name: A/B Medium REC batches 6, 2, 4 on identical short and crowded game menus
-        shell: pwsh
-        run: |
-          $env:PYTHONPATH = (Get-Location).Path
-          python tools/benchmark_medium_batch.py
-          if ($LASTEXITCODE -ne 0) { throw 'Medium OCR A/B comparison failed' }
-          if (-not (Test-Path medium_ocr_ab.json)) { throw 'Medium OCR A/B evidence report missing' }
-      - name: Upload CPU OCR A/B measurements
-        uses: actions/upload-artifact@v4
-        with:
-          name: GameTextReader-V1.7-Medium-CPU-AB
-          path: medium_ocr_ab.json
-          if-no-files-found: error
-          retention-days: 30
-      - name: A/B Medium ONNX CPU threads auto, 1, 2, 4
-        shell: pwsh
-        run: |
-          $env:PYTHONPATH = (Get-Location).Path
-          python tools/benchmark_medium_threads.py
-          if ($LASTEXITCODE -ne 0) { throw 'Medium ONNX CPU threads experiment failed' }
-          if (-not (Test-Path medium_ocr_threads_ab.json)) { throw 'CPU threading A/B report missing' }
-      - name: Upload Medium CPU threading evidence
-        uses: actions/upload-artifact@v4
-        with:
-          name: GameTextReader-V1.7-Medium-CPU-Threads-AB
-          path: medium_ocr_threads_ab.json
-          if-no-files-found: error
-          retention-days: 30
-      - name: Inspect BOTH OCR tiers against English and synthetic Chinese menu (source)
+      - name: Verify Small OCR English/Chinese menu (source)
         shell: pwsh
         run: |
           $testLog = Join-Path $env:TEMP 'GameTextReader_ocr_selftest.txt'
@@ -103,7 +76,7 @@ jobs:
       - name: Remove duplicated RapidOCR model weights
         shell: pwsh
         run: |
-          # App loads only Small DET, Small REC, Medium REC from _internal/models.
+          # V1.8 ships exactly Small DET + Small REC in _internal/models.
           # --collect-data rapidocr otherwise duplicates all four weights.
           $extra = 'dist/GameTextReader/_internal/rapidocr/models'
           foreach ($name in @('PP-OCRv6_det_small.onnx','PP-OCRv6_rec_small.onnx','PP-OCRv6_det_medium.onnx','PP-OCRv6_rec_medium.onnx')) {
@@ -116,12 +89,17 @@ jobs:
       - name: Verify bundled models
         shell: pwsh
         run: |
-          $names = @('PP-OCRv6_det_small.onnx','PP-OCRv6_rec_small.onnx','PP-OCRv6_rec_medium.onnx')
+          $names = @('PP-OCRv6_det_small.onnx','PP-OCRv6_rec_small.onnx')
           foreach ($name in $names) {
             $file = Join-Path "dist/GameTextReader/_internal/models" $name
             if (-not (Test-Path $file)) { throw "Missing offline ONNX: $name" }
           }
-      - name: Truly execute frozen EXE and test BOTH OCR tiers
+          $allOnnx = @(Get-ChildItem "dist/GameTextReader" -Recurse -Filter '*.onnx' | Select-Object -ExpandProperty Name)
+          foreach ($name in $allOnnx) {
+            if ($name -match '(?i)medium') { throw "Medium OCR model must not ship: $name" }
+          }
+          if (@($allOnnx).Count -ne 2) { throw "Expected 2 Small weights, got $(@($allOnnx).Count): $allOnnx" }
+      - name: Truly execute frozen EXE using Small OCR only
         shell: pwsh
         run: |
           $testLog = Join-Path $env:TEMP 'GameTextReader_ocr_selftest.txt'
@@ -160,7 +138,7 @@ jobs:
           if (($process.ExitCode -ne 0) -or (-not $report.StartsWith('PASS'))) {
             throw "Frozen UI/overlay test failed (exit=$($process.ExitCode))"
           }
-      - name: Launch full frozen V1.7 Tk application for startup verification
+      - name: Launch full frozen V1.8 Tk application for startup verification
         shell: pwsh
         run: |
           $testLog = Join-Path $env:TEMP 'GameTextReader_app_selftest.txt'
@@ -171,7 +149,7 @@ jobs:
           $report = Get-Content $testLog -Raw
           Write-Output $report
           if (($process.ExitCode -ne 0) -or (-not $report.StartsWith('PASS'))) {
-            throw "Full V1.6 application startup failed (exit=$($process.ExitCode))"
+            throw "Full V1.8 application startup failed (exit=$($process.ExitCode))"
           }
       - name: Validate third-party Guangrong fallback has no bundled DLL
         shell: pwsh
@@ -205,16 +183,69 @@ jobs:
           if (($process.ExitCode -ne 0) -or (-not $report.StartsWith('PASS'))) {
             throw "Frozen Guangrong external native DLL loader regression (exit=$($process.ExitCode))"
           }
+      - name: Compile standalone BaoYi V2 read-only voice investigator
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $csc = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+          if (-not (Test-Path $csc)) { throw 'Missing .NET Framework compiler' }
+          & $csc /nologo /target:winexe /platform:x64 /optimize+ /r:System.Windows.Forms.dll /r:System.Drawing.dll /out:dist/GameTextReader/BaoYiVoiceInspector_V2.exe diagnostics/BaoYiVoiceInspector.cs
+          if ($LASTEXITCODE -ne 0) { throw 'BaoYi V2 inspector compile failed' }
+          & $csc /nologo /target:exe /platform:x64 /out:"$env:RUNNER_TEMP/BoySpeechSlave_TestDummy.exe" diagnostics/ProbeHost.cs
+          if ($LASTEXITCODE -ne 0) { throw 'Harmless speech-host dummy compile failed' }
+          Copy-Item diagnostics/README_V2.txt dist/GameTextReader/BaoYiVoiceInspector_V2_README.txt
+      - name: Test V2 investigator with actual Windows dummy process
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = (Resolve-Path dist/GameTextReader/BaoYiVoiceInspector_V2.exe).Path
+          $test = Join-Path $env:TEMP 'BaoYiVoiceInspector_test.txt'
+          Remove-Item $test -ErrorAction SilentlyContinue
+          $testProcess = Start-Process -FilePath $exe -ArgumentList '--self-test' -Wait -PassThru
+          if ($testProcess.ExitCode -ne 0 -or -not (Test-Path $test) -or -not ((Get-Content $test -Raw).StartsWith('PASS'))) {
+            throw 'V2 self-test failed'
+          }
+          $dummyPath = (Resolve-Path "$env:RUNNER_TEMP/BoySpeechSlave_TestDummy.exe").Path
+          $dummy = Start-Process -FilePath $dummyPath -PassThru
+          try {
+            Start-Sleep -Milliseconds 700
+            $scanFile = Join-Path $env:TEMP 'BaoYiVoiceInspector_ci_scan.txt'
+            Remove-Item $scanFile -ErrorAction SilentlyContinue
+            $scan = Start-Process -FilePath $exe -ArgumentList '--ci-scan' -Wait -PassThru
+            if ($scan.ExitCode -ne 0 -or -not (Test-Path $scanFile)) { throw 'V2 scan failed' }
+            $report = Get-Content $scanFile -Raw -Encoding UTF8
+            if (-not $report.Contains('BoySpeechSlave_TestDummy.exe') -or -not $report.Contains('BoySpeechSlave 运行中：是')) {
+              throw 'SpeechSlave dummy was not detected by V2 scanner'
+            }
+            if (-not $report.Contains('进程位数：')) { throw 'Process architecture was not reported' }
+            if ($report.Contains('进程：BaoYiVoiceInspector_V2.exe')) { throw 'Inspector misidentified itself as BaoYi' }
+            if ($env:USERPROFILE -and $report.Contains($env:USERPROFILE)) { throw 'Unredacted user home path in report' }
+            Write-Output 'PASS: speech-host dummy identified, 32/64 bit checked, own process excluded'
+          }
+          finally { if ($dummy -and -not $dummy.HasExited) { Stop-Process -Id $dummy.Id -Force -ErrorAction SilentlyContinue } }
       - name: Assemble ONLY portable ZIP
         shell: pwsh
         run: |
           New-Item -ItemType Directory release -Force | Out-Null
-          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_V1.7_Medium_CPU2_Windows_x64_Portable.zip -CompressionLevel Optimal -Force
-          $size = (Get-Item release/GameTextReader_V1.7_Medium_CPU2_Windows_x64_Portable.zip).Length
+          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_V1.8_Small_TTSProbe_Windows_x64_Portable.zip -CompressionLevel Optimal -Force
+          $size = (Get-Item release/GameTextReader_V1.8_Small_TTSProbe_Windows_x64_Portable.zip).Length
           Write-Output "Portable archive size: $size bytes"
+          Copy-Item dist/GameTextReader/BaoYiVoiceInspector_V2.exe release/BaoYiVoiceInspector_V2.exe
+          Copy-Item diagnostics/README_V2.txt release/README_V2.txt
+          Compress-Archive -Path release/BaoYiVoiceInspector_V2.exe,release/README_V2.txt -DestinationPath release/BaoYiVoiceInspector_V2_ReadOnly.zip -CompressionLevel Optimal -Force
+          $v2zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path release/BaoYiVoiceInspector_V2_ReadOnly.zip).Path)
+          try {
+            if ($v2zip.Entries.Count -ne 2) { throw 'Unexpected V2 ZIP entries' }
+          } finally { $v2zip.Dispose() }
       - uses: actions/upload-artifact@v4
         with:
-          name: GameTextReader-V1.7-Medium-CPU2-Portable
-          path: release/GameTextReader_V1.7_Medium_CPU2_Windows_x64_Portable.zip
+          name: GameTextReader-V1.8-Small-TTSProbe-Portable
+          path: release/GameTextReader_V1.8_Small_TTSProbe_Windows_x64_Portable.zip
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BaoYiVoiceInspector-V2-Windows-x64-ReadOnly
+          path: release/BaoYiVoiceInspector_V2_ReadOnly.zip
           if-no-files-found: error
           retention-days: 30
