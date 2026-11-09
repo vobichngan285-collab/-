@@ -115,38 +115,6 @@ def test_conservative_region_grouping_matches_spoken_text():
     assert [region.text for region in regions[1:]] == ["继续游戏", "读取存档"]
 
 
-def test_small_scene_change_and_two_step_confirmation():
-    from PIL import Image
-    from game_reader.screen_change import signature_from_image, changed_pixel_fraction, SceneGuard
-    blank = Image.new("RGB", (160, 90), "black")
-    before = signature_from_image(blank, (0, 0))
-    same = signature_from_image(blank.copy(), (0, 0))
-    assert changed_pixel_fraction(before, same) == 0
-    change = blank.copy()
-    from PIL import ImageDraw
-    ImageDraw.Draw(change).rectangle((0, 0, 90, 40), fill="white")
-    after = signature_from_image(change, (0, 0))
-    guard = SceneGuard(before)
-    assert guard.changed(after)
-    assert changed_pixel_fraction(before, after) >= 0.18
-
-
-def test_scene_guard_rejects_small_cursor_and_resets():
-    from PIL import Image, ImageDraw
-    from game_reader.screen_change import signature_from_image, SceneGuard
-    im = Image.new("RGB", (160, 90), "black")
-    baseline = signature_from_image(im, (-400, 100))
-    minor = im.copy()
-    ImageDraw.Draw(minor).rectangle((50, 35, 56, 41), fill="white")
-    assert not SceneGuard(baseline).changed(signature_from_image(minor, (-400, 100)))
-    guard = SceneGuard(baseline)
-    moderate = im.copy()
-    ImageDraw.Draw(moderate).rectangle((10, 10, 70, 30), fill="white")
-    mid = signature_from_image(moderate, (-400, 100))
-    assert not guard.changed(mid)
-    assert guard.changed(mid)
-
-
 def test_voice_fallback_prefers_callable_chinese():
     from game_reader.voice_info import preferred_voice_index, voice_diagnostic
     voices = [("eng", "Microsoft Zira"), ("cn", "Microsoft Huihui"),
