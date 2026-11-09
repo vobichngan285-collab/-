@@ -367,3 +367,10 @@
 - **真实 CI 状态**：最后 GitHub Actions run **`42674922910` completed/success**；**78 passed, 1 skipped, 1 warning**（skip 是 hosted source Python 的 Tcl 运行时，冻结 EXE 真正运行 3 次 F11 Tk picker 测试 PASS）；Windows 实测 frozen EXE 通过 V1.2 Small OCR、SAPI/WinRT 模块、云希/晓晓worker无密钥协议与中文路径/复用、点击穿透框自检、全应用 GUI 启动与 UIA (35命名原生控件 + 六页)、ZIP 文件生成及上传。早期 run `42673587752` 的测试脚本自身误判文档中的 Canvas 用词，随后修复；run `42674652065` 因新增诊断日志行的 Python 转义符错误在 compileall 被挡住，已修复；另几次 run 0 jobs 的调度失败不代表通过。只有最后绿色完整 run 为验收结果。
 - **下载地址**：GitHub Actions Artifact **`13698963874`**，名称 `GameTextReader-V12-CleanBlue-AccessibleFilterOCR-Experimental`，大小 **129,812,722 bytes**，临时保留至 `2026-12-09T18:34:10Z`，公开可验证链接 https://github.com/vobichngan285-collab/-/actions/runs/42674922910/artifacts/13698963874 。Windows x64 便携双层 ZIP，用户要逐层解压，在单独目录启动 `GameTextReader.exe`，不覆盖旧版本。软件截图和语音许可不上传。
 - **尚未完成的实机部分**：用户 Windows11 实际游戏《七日杀》中鼠标跟随绿色框的穿透和坐标、短名称“碎布”、朗读节奏、三类过滤是否符合个人偏好、真实云希/晓晓实际声音，以及用户使用的**真实无障碍读屏器是否逐个读出新 UI 控件**都需用户亲机测试。**不能将 Windows UI Automation 的 provider 通过宣传为实际辅助读屏器实测已过**。如果用户在读屏器里遇到不朗读，下一轮优先修复该问题，不改变旧成功的 V1.2 OCR 和语音链。
+
+## 2026-11-10 Windows Blue Star OCR V1.2 清爽蓝色 UI 功能微调／性能优化实验（通过 Windows CI）
+
+- **代码分支**：`feat/windows-v12-cursor-drag-clear-speed-20261110`；**Build SHA**：`d5720f6924471200b3f2b68cc5a42a7c74f7c653`；基于 `6f1a78125c3fab9e7b0d04f7ac0180ea266a3b69`，没有覆盖原版蓝 UI。
+- **功能**：默认模式识别成功且有可朗读内容播放短促叮声（可关闭）；F11 光标起点四方向拖动松开立即 OCR，绿色框跟随保存 X/Y 偏移；新增可自定义 F6 立即清除 OCR 与朗读、取消过期结果，原 60 秒自动清空保留。修复 `spoken` 未初始化、延迟调度及旧语音队列，局部截图减少重复颜色转换、OCR 串行锁、截图与推理分段耗时记录。
+- **验证**：GitHub Actions [42684557197](https://github.com/vobichngan285-collab/-/actions/runs/42684557197) `completed/success`；87 passed / 1 warning，冻结 Windows EXE Small OCR、UI Automation 37 个原生命名控件、F11 Tk 重复拖框、常驻自然语音 worker 协议、原版 Luna 哈希与 GPL 源码等检查均成功。
+- **交付**：GitHub Actions [artifact 13704431105](https://github.com/vobichngan285-collab/-/actions/runs/42684557197/artifacts/13704431105) (129817505 bytes, 至 2026-12-09T19:36:02Z)，便携 ZIP，**不含私人语音配置**。下一步 Windows11 游戏场景、自然语音真实出声/提速、真实读屏器真机验收，不保证任何未经测试的速度改善百分比。
