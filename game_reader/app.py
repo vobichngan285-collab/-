@@ -71,17 +71,15 @@ class ReaderApp:
         root.protocol("WM_DELETE_WINDOW", self.close)
 
         self.settings = read_settings()
-        if not self.settings.get("luna_config"):
-            # A copy of the Bilibili author's JSON may sit next to the EXE.
-            # Read it in place, do not rewrite or upload its contents.
-            program_dir = (Path(sys.executable).parent if getattr(sys, "frozen", False)
-                           else Path(__file__).resolve().parents[1])
-            candidate = program_dir / "config..json"
-            if candidate.is_file():
-                self.settings["luna_config"] = str(candidate)
-                # Original file packaged alongside the EXE is the intended
-                # default; run the upstream unmodified Luna engine, not SAPI.
-                self.settings["voice"] = "luna:original"
+        # A byte-identical copy of the author's config..json beside this EXE
+        # always takes precedence over any older V1.8/V1.9 saved settings.
+        # This prevents accidentally reading a previously selected engine.
+        program_dir = (Path(sys.executable).parent if getattr(sys, "frozen", False)
+                       else Path(__file__).resolve().parents[1])
+        candidate = program_dir / "config..json"
+        if candidate.is_file():
+            self.settings["luna_config"] = str(candidate)
+            self.settings["voice"] = "luna:original"
         local_dll = installed_x64_dll()
         # Strictly independent engine. Never bind to the user's running
         # screen reader or its installed engine directory.
