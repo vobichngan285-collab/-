@@ -119,7 +119,7 @@ class ReaderApp:
     def create_widgets(self):
         p = ttk.Frame(self.root, padding=12)
         p.pack(fill="both", expand=True)
-        ttk.Label(p, text="游戏文字助手 V1.5 · 独立广荣语音实验",
+        ttk.Label(p, text="游戏文字助手 V1.6 · 独立广荣兼容测试",
                   font=("Microsoft YaHei UI", 16, "bold")).pack(anchor="w")
         ttk.Label(p, text="按 F8 截图识别，鼠标进入文字区域立刻朗读；"
                   "按 F8 更新旧结果，识别结果最多保留 60 秒。",
@@ -275,7 +275,7 @@ class ReaderApp:
 
     def copy_runtime_log(self):
         info = [
-            "GameTextReader V1.5 | 仅数值与状态，不含截图和识别文字",
+            "GameTextReader V1.6 | 仅数值与状态，不含截图和识别文字",
             f"当前模型：{self.settings['tier']}",
             f"当前识别文字区域：{len(self.lines)}",
             f"广荣独立组件已准备：{bool(installed_x64_dll())}",
