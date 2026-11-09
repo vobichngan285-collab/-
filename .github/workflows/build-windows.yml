@@ -186,7 +186,7 @@ jobs:
                   req = {"command": "check_config", "config_path": path}
                   result = subprocess.run([exe, "--luna-worker"],
                       input=json.dumps(req, ensure_ascii=False)+"\n",
-                      capture_output=True, text=True, timeout=25)
+                      capture_output=True, text=True, encoding="utf-8", timeout=25)
                   answer = json.loads(result.stdout.strip())
                   assert answer["stage"] == "config_read", answer
                   assert answer["code"] == expected, answer
