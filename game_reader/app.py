@@ -34,7 +34,9 @@ from .hover_modes import (MOUSE_SIDE_VKS, DEFAULT_REGION, RelativeRegion,
                           cursor_still_near_capture)
 from .region_picker import ScreenRegionPicker
 from .foreground import foreground_class, foreground_window_id
-from .hover_target import centered_region, nearest_readable_text
+from .hover_target import centered_region
+from .text_filters import (DEFAULT_FILTER_SETTINGS, filter_speech_text,
+                           is_repeat_speech, similarity_threshold)
 
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "GameTextReader"
 CONFIG_PATH = CONFIG_DIR / "settings.json"
@@ -45,7 +47,8 @@ DEFAULTS = {"vk": 0x77, "hotkey_label": "F8",
             "pick_vk": 0x7A, "pick_hotkey_label": "F11",
             "period_ms": 500, "region": list(DEFAULT_REGION),
             "tier": "small", "voice": "", "rate": 0,
-            "volume": 100, "dwell_ms": 0, "luna_config": ""}
+            "volume": 100, "dwell_ms": 0, "luna_config": "",
+            **DEFAULT_FILTER_SETTINGS}
 RESULT_TTL_SECONDS = 60.0
 
 
@@ -67,6 +70,14 @@ def read_settings() -> dict:
         RelativeRegion.from_settings(settings["region"])).as_list()
     settings["tier"] = "small"
     settings["dwell_ms"] = 0
+    try:
+        settings["similarity_threshold"] = similarity_threshold(
+            settings["similarity_threshold"])
+    except ValueError:
+        settings["similarity_threshold"] = 2
+    for key in DEFAULT_FILTER_SETTINGS:
+        if key != "similarity_threshold":
+            settings[key] = bool(settings[key])
     return settings
 
 
@@ -80,9 +91,9 @@ def write_settings(settings: dict) -> None:
 class ReaderApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        root.title("游戏文字助手 · V1.2 Small / 悬停 OCR 实验版")
-        root.geometry("760x860")
-        root.minsize(660, 710)
+        root.title("Blue Star OCR · 游戏文字朗读助手")
+        root.geometry("1120x900")
+        root.minsize(960, 760)
         root.protocol("WM_DELETE_WINDOW", self.close)
 
         self.settings = read_settings()
@@ -111,6 +122,7 @@ class ReaderApp:
         self.mode_generation = 0
         self.hover_ocr_busy = False
         self._hover_last_text = ""
+        self._mode_announcement_until = 0.0
         self._hover_next_due = time.monotonic() + 0.5
         self.pending_full_capture = False
         self._region_picker = None
@@ -127,10 +139,15 @@ class ReaderApp:
         self.speech.set_volume(self.settings["volume"])
         self.cues = CuePlayer()
         self.overlay = None
+        self.scan_frame = None
         self.overlay_error = ""
         try:
             from .overlay import ClickThroughOutline
             self.overlay = ClickThroughOutline()
+            # Independently from the legacy V1.2 target outline, four
+            # 2px non-activating windows show the actual cursor crop edge.
+            self.scan_frame = ClickThroughOutline(
+                alpha=92, padding=3, thickness=2)
         except Exception as ex:
             self.overlay_error = f"{type(ex).__name__}: {ex}"
 
@@ -416,7 +433,12 @@ class ReaderApp:
         }
         for key, page in self._pages.items():
             if key == which:
+                page.grid()
                 page.tkraise()
+            else:
+                # Actual unmapping is critical: NVDA/Windows UIA must NOT
+                # tab into controls from a page hidden underneath this one.
+                page.grid_remove()
             self.nav_buttons[key].configure(
                 style="Selected.Nav.TButton" if key == which else "Nav.TButton")
         self.page_title.set(titles[which])
@@ -449,24 +471,51 @@ class ReaderApp:
         self.status(f"文本相似度阈值已设置为 {value}。")
 
     def enable_accessibility(self):
+        """Name native controls for Windows UIA; fail explicit self-test if lost."""
         try:
             import tk_uia
             result = tk_uia.enable(self.root)
-            for widget, label in (
-                (self.key_button, "设置键盘或鼠标侧键全屏截图快捷键"),
-                (self.mode_key_button, "设置键盘或鼠标侧键切换朗读模式"),
-                (self.local_key_button, "设置键盘或鼠标侧键手动局部 OCR"),
-                (self.pick_key_button, "设置全局暗屏框选快捷键"),
-                (self.period_entry, "局部 OCR 自动刷新毫秒间隔"),
-                (self.pick_region_button, "暗屏框选鼠标居中 OCR 的宽度和高度"),
-                (self.voice_select, "选择本地 TTS 声音"),
-                (self.import_luna_button, "选择原版语音配置文件"),
-                (self.rate_slider, "语速"),
-                (self.volume_slider, "音量"),
-                (self.output, "当前截图识别的文字"),
-                (self.status_label, "OCR 与朗读状态"),
+            targets = [
+                (self.key_button, "全屏 OCR 截图快捷键"),
+                (self.mode_key_button, "切换默认模式和鼠标模式的快捷键"),
+                (self.local_key_button, "立即识别鼠标附近文字的快捷键"),
+                (self.pick_key_button, "全局暗屏调整鼠标扫描宽高的快捷键"),
+                (self.period_entry, "鼠标局部 OCR 周期，单位毫秒"),
+                (self.period_save_button, "保存局部 OCR 周期"),
+                (self.similarity_check, "启用重复文本相似度过滤"),
+                (self.similarity_spin, "文本相似度阈值零到八"),
+                (self.show_frame_check, "显示跟随鼠标的绿色扫描框"),
+                (self.mode_voice_check, "切换模式时说出鼠标模式或默认模式"),
+                (self.pick_region_button, "暗屏框选扫描区域"),
+                (self.voice_select, "选择本机微软云希晓晓或其他语音"),
+                (self.rescan_button, "重新扫描本机语音"),
+                (self.preview_button, "试听当前选中语音"),
+                (self.stop_button, "立即停止朗读"),
+                (self.voice_diag_button, "复制语音诊断"),
+                (self.import_luna_button, "选择本机原版语音配置"),
+                (self.rate_slider, "调整朗读语速"),
+                (self.volume_slider, "调整朗读音量"),
+                (self.read_btn, "立即截图进行原版全屏 OCR"),
+                (self.filter_english_check, "过滤英文字母，开关"),
+                (self.filter_numbers_check, "过滤数字，开关"),
+                (self.filter_symbols_check, "过滤符号，开关"),
+                (self.output, "最近一次 OCR 识别结果，原文"),
+                (self.status_label, "当前工作模式和 OCR 状态"),
+            ]
+            for key, label in (
+                ("mouse", "进入 OCR 与鼠标设置"),
+                ("voice", "进入语音设置"),
+                ("fullscreen", "进入全屏 OCR 设置"),
+                ("filters", "进入内容过滤设置"),
+                ("general", "进入通用设置"),
+                ("about", "进入关于软件"),
             ):
+                targets.append((self.nav_buttons[key], label))
+            for widget, label in targets:
+                if not widget.winfo_exists():
+                    raise RuntimeError("控件不存在：" + label)
                 tk_uia.set_acc_name(widget, label)
+            self.accessibility_targets = targets
             self.accessibility_status = str(result)
         except Exception as exc:
             self.accessibility_status = "FAILED: " + str(exc)
