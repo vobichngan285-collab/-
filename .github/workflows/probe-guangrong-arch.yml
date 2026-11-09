@@ -28,6 +28,11 @@ jobs:
         run: |
           python tools/probe_grtts_arch.py "$env:RUNNER_TEMP/original/synthDrivers"
           Write-Output "x64 native probe exit=$LASTEXITCODE"
+          foreach ($mode in @('COM_STA','COM_MTA','WINRT_MTA')) {
+            $env:GR_INIT_SCENARIO = $mode
+            python tools/probe_grtts_arch.py "$env:RUNNER_TEMP/original/synthDrivers"
+            Write-Output "x64 $mode native probe exit=$LASTEXITCODE"
+          }
           exit 0
       - uses: actions/setup-python@v5
         with:
