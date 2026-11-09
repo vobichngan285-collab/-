@@ -185,7 +185,7 @@ jobs:
                                       "local_voice_config_file_missing")):
                   req = {"command": "check_config", "config_path": path}
                   result = subprocess.run([exe, "--luna-worker"],
-                      input=json.dumps(req, ensure_ascii=False)+"\\n",
+                      input=json.dumps(req, ensure_ascii=False)+"\n",
                       capture_output=True, text=True, timeout=25)
                   answer = json.loads(result.stdout.strip())
                   assert answer["stage"] == "config_read", answer
