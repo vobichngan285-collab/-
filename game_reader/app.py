@@ -308,29 +308,155 @@ class ReaderApp:
             self.status("设置保存失败：" + str(ex))
 
     def capture_hotkey(self):
+        self.begin_hotkey("vk")
+
+    def begin_hotkey(self, field: str):
+        if self._choosing_region:
+            return
+        if self.setting_hotkey:
+            self.finish_hotkey()
         self.setting_hotkey = True
-        self.key_button.configure(text="请按单键...")
+        self._binding_target = field
+        self._hotkey_button(field).configure(text="请按键／侧键")
+        self._side_previous = {vk: is_key_down(vk) for vk in MOUSE_SIDE_VKS}
         self.root.bind("<KeyPress>", self.accept_key)
         self.root.focus_force()
+        self.status("按键盘单键或鼠标侧键1/2进行设置；Esc 取消。")
+
+    def _hotkey_button(self, field: str):
+        return {"vk": self.key_button, "mode_vk": self.mode_key_button,
+                "local_vk": self.local_key_button}[field]
+
+    def finish_hotkey(self):
+        target = self._binding_target
+        self.setting_hotkey = False
+        self._binding_target = None
+        self.root.unbind("<KeyPress>")
+        if target:
+            label = HOTKEY_LABELS[HOTKEY_FIELDS.index(target)]
+            self._hotkey_button(target).configure(text=self.settings[label])
 
     def accept_key(self, event):
         if event.keysym == "Escape":
-            self.setting_hotkey = False
-            self.root.unbind("<KeyPress>")
-            self.key_button.configure(text=self.settings["hotkey_label"])
-            return
-        vk = int(event.keycode)
-        if vk in MODIFIER_KEYS or not 1 <= vk <= 254:
-            self.status("请使用字母、数字、F 功能键或小键盘单键。")
-            return
-        self.settings["vk"] = vk
-        self.settings["hotkey_label"] = event.keysym
-        self.setting_hotkey = False
-        self.key_previous = True
-        self.key_button.configure(text=event.keysym)
-        self.root.unbind("<KeyPress>")
+            self.finish_hotkey()
+            self.status("已取消快捷键设置。")
+            return "break"
+        try:
+            vk = int(event.keycode)
+        except (TypeError, ValueError):
+            return "break"
+        self._apply_hotkey(vk, event.keysym)
+        return "break"
+
+    def _apply_hotkey(self, vk: int, keyname: str = "") -> bool:
+        if not valid_hotkey(vk) or self._binding_target is None:
+            self.status("仅接受键盘单键或两枚标准鼠标侧键；不接受左／右点击和修饰键。")
+            return False
+        field = self._binding_target
+        for other in HOTKEY_FIELDS:
+            if other != field and self.settings[other] == vk:
+                self.status("该按键已用于其他功能，请换一个不冲突的键。")
+                return False
+        label_field = HOTKEY_LABELS[HOTKEY_FIELDS.index(field)]
+        label = hotkey_label(vk, keyname)
+        self.settings[field] = vk
+        self.settings[label_field] = label
+        self._hotkey_previous[field] = True
+        self.finish_hotkey()
         self.persist()
-        self.status(f"截图热键已设置：{event.keysym}")
+        self.status(f"快捷键已设为：{label}")
+        return True
+
+    def _capture_mouse_hotkey(self):
+        # Tk KeyPress excludes XBUTTON1/XBUTTON2. Use the same native
+        # Windows virtual-key state reader as the actual hotkey dispatcher.
+        for vk in MOUSE_SIDE_VKS:
+            down = is_key_down(vk)
+            old = self._side_previous.get(vk, down)
+            self._side_previous[vk] = down
+            if down and not old and self.setting_hotkey:
+                self._apply_hotkey(vk, hotkey_label(vk))
+                return
+
+    @staticmethod
+    def format_region(region: RelativeRegion) -> str:
+        return (f"识别区域 {region.width} × {region.height} 像素，"
+                f"相对鼠标偏移 ({region.x}, {region.y})；可重新框选。")
+
+    def save_period(self):
+        try:
+            period = parse_period_ms(self.period_var.get())
+        except ValueError as exc:
+            self.status(str(exc))
+            return
+        self.settings["period_ms"] = period
+        self._hover_next_due = time.monotonic() + period / 1000.0
+        self.persist()
+        self.status(f"悬停 OCR 周期已设为 {period} 毫秒。")
+
+    def select_region(self):
+        if self._choosing_region or self.closed:
+            return
+        if self.setting_hotkey:
+            self.finish_hotkey()
+        try:
+            monitor = monitor_rect_at_cursor()
+        except Exception as exc:
+            self.status("无法获取显示器尺寸：" + type(exc).__name__)
+            return
+        self._choosing_region = True
+        self.root.withdraw()
+        self.root.after(180, lambda: self._open_region_picker(monitor))
+
+    def _open_region_picker(self, monitor):
+        if self.closed or not self._choosing_region:
+            return
+        try:
+            self._region_picker = ScreenRegionPicker(
+                self.root, monitor,
+                RelativeRegion.from_settings(self.settings["region"]),
+                self._region_picked)
+        except Exception as exc:
+            self._region_picked(None)
+            self.status("暗屏框选初始化失败：" + type(exc).__name__)
+
+    def _region_picked(self, region: RelativeRegion | None):
+        self._region_picker = None
+        self._choosing_region = False
+        if self.closed:
+            return
+        self.root.deiconify()
+        self.root.lift()
+        if region is None:
+            self.status("框选已取消，原识别区域未改变。")
+        else:
+            self.settings["region"] = region.as_list()
+            self.region_info_var.set(self.format_region(region))
+            self._hover_last_text = ""
+            self.persist()
+            self.status("已保存相对鼠标的局部 OCR 区域；切换到悬停模式后生效。")
+        self._hover_next_due = time.monotonic() + self.settings["period_ms"] / 1000.0
+
+    def toggle_mouse_mode(self):
+        self.mouse_mode = next_mouse_mode(self.mouse_mode)
+        self.mode_generation += 1
+        self._hover_last_text = ""
+        self.hover.reset()
+        self.last_target = None
+        self.speech.stop()
+        if self.overlay is not None:
+            self.overlay.hide()
+        if self.mouse_mode == "hover":
+            self.mouse_mode_var.set("当前：鼠标悬停局部 OCR（周期 + 手动触发）")
+            self._hover_next_due = time.monotonic() + 0.35
+            if self.root.state() == "normal":
+                self.root.iconify()
+            self.status("已进入鼠标悬停 OCR 模式；识别区域会跟随鼠标。")
+        else:
+            self.mouse_mode_var.set("当前：默认鼠标指向已识别文字朗读")
+            self._hover_next_due = float("inf")
+            self.update_output("\n".join(line.text for line in self.lines))
+            self.status("已切换回原来的鼠标指向朗读模式。")
 
     def import_luna_config(self):
         selected = filedialog.askopenfilename(
