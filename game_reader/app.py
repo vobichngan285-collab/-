@@ -65,7 +65,7 @@ def write_settings(settings: dict) -> None:
 class ReaderApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        root.title("游戏文字助手 V1.9 实验 · Luna 原配置自然语音")
+        root.title("游戏文字助手 V2.0 · 原版 Luna 自然语音")
         root.geometry("690x720")
         root.minsize(610, 650)
         root.protocol("WM_DELETE_WINDOW", self.close)
@@ -79,6 +79,9 @@ class ReaderApp:
             candidate = program_dir / "config..json"
             if candidate.is_file():
                 self.settings["luna_config"] = str(candidate)
+                # Original file packaged alongside the EXE is the intended
+                # default; run the upstream unmodified Luna engine, not SAPI.
+                self.settings["voice"] = "luna:original"
         local_dll = installed_x64_dll()
         # Strictly independent engine. Never bind to the user's running
         # screen reader or its installed engine directory.
@@ -132,7 +135,7 @@ class ReaderApp:
     def create_widgets(self):
         p = ttk.Frame(self.root, padding=12)
         p.pack(fill="both", expand=True)
-        ttk.Label(p, text="游戏文字助手 V1.9 实验 · Luna 原配置自然语音",
+        ttk.Label(p, text="游戏文字助手 V2.0 · 原版 Luna 自然语音",
                   font=("Microsoft YaHei UI", 16, "bold")).pack(anchor="w")
         ttk.Label(p, text="按 F8 截图识别，鼠标进入文字区域立刻朗读；"
                   "按 F8 更新旧结果，识别结果最多保留 60 秒。",
@@ -310,7 +313,7 @@ class ReaderApp:
 
     def copy_runtime_log(self):
         info = [
-            "GameTextReader V1.9 Luna 实验 | 仅数值与状态，不含截图、配置许可文字和识别文字",
+            "GameTextReader V2.0 原版 Luna | 仅数值与状态，不含截图、配置许可文字和识别文字",
             f"当前模型：{self.settings['tier']}",
             f"当前识别文字区域：{len(self.lines)}",
             f"广荣独立组件已准备：{bool(installed_x64_dll())}",
