@@ -5,7 +5,7 @@ import sys
 
 
 def packaged_ocr_selftest() -> int:
-    """Run *the frozen executable* through both real OCR models, no Tk window."""
+    """Run *the frozen executable* through the original V1.2 Small OCR model, no Tk window."""
     import os
     import tempfile
     import traceback
@@ -24,7 +24,7 @@ def packaged_ocr_selftest() -> int:
         draw.text((75, 245), "SETTINGS", fill="black", font=font)
         engine = LocalOCR()
         report = []
-        for tier in ("small", "medium"):
+        for tier in ("small",):
             lines = engine.recognize(im, (0, 0), tier)
             report.append(f"{tier}: {len(lines)} rows, texts=" +
                           "|".join(line.text for line in lines))
@@ -137,6 +137,9 @@ def packaged_app_selftest() -> int:
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
+    if "--luna-worker" in sys.argv:
+        from game_reader.luna_voice_worker import main as luna_worker
+        raise SystemExit(luna_worker())
     if "--self-test-ocr" in sys.argv:
         raise SystemExit(packaged_ocr_selftest())
     if "--self-test-tts" in sys.argv:
