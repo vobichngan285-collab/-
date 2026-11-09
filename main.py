@@ -272,6 +272,106 @@ def packaged_guangrong_loader_selftest() -> int:
             bridge.close()
 
 
+def packaged_luna_selftest() -> int:
+    """Frozen EXE: prove original JSON fields feed the SDK adapter exactly.
+
+    CI has no Yunxi/Xiaoxiao model and must never claim a natural WAV.
+    The bundled Microsoft SDK must be importable, and the EXE worker callable.
+    """
+    import json
+    from pathlib import Path
+    import subprocess
+    import tempfile
+    import traceback
+    from types import SimpleNamespace
+
+    log = Path(tempfile.gettempdir()) / "GameTextReader_luna_selftest.txt"
+    try:
+        import azure.cognitiveservices.speech as speechsdk
+        assert hasattr(speechsdk, "EmbeddedSpeechConfig")
+        assert hasattr(speechsdk.PropertyId, "SpeechServiceConnection_SynthModelKey")
+        assert hasattr(speechsdk.SpeechSynthesisOutputFormat, "Riff24Khz16BitMonoPcm")
+        from game_reader.luna_natural_voice import (
+            load_original_config, synthesize_exact_config
+        )
+        with tempfile.TemporaryDirectory(prefix="GTR_luna_CI_") as folder:
+            root = Path(folder)
+            dummy = root / "MicrosoftWindows.Voice.zh-CN.Yunxi.FAKE"
+            dummy.mkdir()
+            license_text = "EXAMPLE DATA ONLY: keep   spaces\n and newlines."
+            original = root / "config..json"
+            original.write_text(json.dumps({
+                "reader": {"windowstts": {"use": True, "name": "WindowsTTS",
+                                        "voice": [1, str(dummy)]}},
+                "MicrosoftWindows.Voice.License": license_text,
+                "MicrosoftWindows.Speech.License": "other unrelated field"
+            }, ensure_ascii=False), encoding="utf-8")
+
+            selection = load_original_config(original)
+            assert selection.license_text == license_text
+            calls = []
+            audio = b"RIFF" + b"\0" * 4 + b"WAVE" + b"\0" * 2048
+
+            class FakeConfig:
+                @classmethod
+                def from_path(cls, path):
+                    calls.append(("model", path))
+                    return cls()
+                def set_property(self, field, value):
+                    calls.append(("license", field, value))
+                def set_speech_synthesis_output_format(self, value):
+                    calls.append(("format", value))
+                def get_speech_config(self):
+                    return self
+
+            class FakeSynth:
+                def __init__(self, speech_config, audio_config):
+                    pass
+                def speak_ssml_async(self, text):
+                    calls.append(("speak_ssml", text))
+                    return SimpleNamespace(get=lambda: SimpleNamespace(
+                        reason="ok", audio_data=audio))
+
+            fake_sdk = SimpleNamespace(
+                EmbeddedSpeechConfig=FakeConfig,
+                PropertyId=SimpleNamespace(
+                    SpeechServiceConnection_SynthModelKey="model-key"),
+                SpeechSynthesisOutputFormat=SimpleNamespace(
+                    Riff24Khz16BitMonoPcm="24k"),
+                SpeechSynthesizer=FakeSynth,
+                ResultReason=SimpleNamespace(
+                    SynthesizingAudioCompleted="ok"))
+            assert synthesize_exact_config(
+                original, "你好，云希", speechsdk=fake_sdk) == audio
+            assert calls[1] == ("license", "model-key", license_text)
+
+            # Test actual frozen subprocess entrypoint without model access.
+            missing_dir = root / "missing_voice_model"
+            config_bad = root / "missing.json"
+            config_bad.write_text(json.dumps({
+                "reader":{"windowstts":{"use":True,"voice":[1,str(missing_dir)]}},
+                "MicrosoftWindows.Voice.License":license_text
+            }),encoding="utf-8")
+            child = subprocess.run(
+                [sys.executable, "--luna-worker"],
+                input=json.dumps({"command":"speak",
+                                  "config_path":str(config_bad),"text":"你好"}),
+                capture_output=True, text=True, timeout=30)
+            response = json.loads(child.stdout.strip())
+            assert response.get("error") == "voice_package_unavailable"
+            assert license_text not in child.stdout
+            assert str(config_bad) not in child.stdout
+
+        log.write_text("PASS\nFrozen SDK imports, exact Luna config property, "
+                       "and private isolated process tested; actual natural "
+                       "WAV unavailable without installed voice model.",
+                       encoding="utf-8")
+        return 0
+    except BaseException:
+        log.write_text("FAIL\n" + traceback.format_exc(), encoding="utf-8")
+        return 1
+
+
 if __name__ == "__main__":
     multiprocessing.freeze_support()
     if "--luna-worker" in sys.argv:
@@ -282,6 +382,8 @@ if __name__ == "__main__":
         raise SystemExit(packaged_ocr_selftest())
     if "--self-test-tts" in sys.argv:
         raise SystemExit(packaged_tts_selftest())
+    if "--self-test-luna" in sys.argv:
+        raise SystemExit(packaged_luna_selftest())
     if "--self-test-ui" in sys.argv:
         raise SystemExit(packaged_ui_selftest())
     if "--self-test-app" in sys.argv:
