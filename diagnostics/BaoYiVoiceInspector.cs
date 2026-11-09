@@ -381,15 +381,11 @@ namespace BaoYiVoiceInspector
                                         items.Add(new ProductLocation(display + " " + version, loc));
                                     }
                                 }
-                                catch (Exception ex) when (ex is System.Security.SecurityException ||
-                                                          ex is UnauthorizedAccessException ||
-                                                          ex is IOException) { }
+                                catch (Exception) { }
                             }
                         }
                     }
-                    catch (Exception ex) when (ex is System.Security.SecurityException ||
-                                              ex is UnauthorizedAccessException ||
-                                              ex is IOException) { }
+                    catch (Exception) { }
                 }
             }
             return items;
@@ -452,6 +448,7 @@ namespace BaoYiVoiceInspector
                     catch (Win32Exception) { ++inaccessible; }
                     catch (InvalidOperationException) { ++inaccessible; }
                     catch (System.Security.SecurityException) { ++inaccessible; }
+                    catch (ArgumentException) { ++inaccessible; }
 
                     var strong = new List<ProcessModule>();
                     var related = new List<ProcessModule>();
