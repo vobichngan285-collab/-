@@ -62,7 +62,7 @@ def write_settings(settings: dict) -> None:
 class ReaderApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        root.title("游戏文字助手 V1.5 · 独立语音实验")
+        root.title("游戏文字助手 V1.7 · Medium 速度实验")
         root.geometry("690x720")
         root.minsize(610, 650)
         root.protocol("WM_DELETE_WINDOW", self.close)
@@ -77,6 +77,7 @@ class ReaderApp:
         self.events: Queue[tuple] = Queue()
         self.lines: list[OCRLine] = []
         self.ocr_worker = LocalOCR()
+        self._prewarm_serial = 0
         self.busy = False
         self.capture_started_at = None
         self.capture_warned = False
@@ -119,7 +120,7 @@ class ReaderApp:
     def create_widgets(self):
         p = ttk.Frame(self.root, padding=12)
         p.pack(fill="both", expand=True)
-        ttk.Label(p, text="游戏文字助手 V1.6 · 独立广荣兼容测试",
+        ttk.Label(p, text="游戏文字助手 V1.7 · Medium 速度实验",
                   font=("Microsoft YaHei UI", 16, "bold")).pack(anchor="w")
         ttk.Label(p, text="按 F8 截图识别，鼠标进入文字区域立刻朗读；"
                   "按 F8 更新旧结果，识别结果最多保留 60 秒。",
@@ -139,7 +140,7 @@ class ReaderApp:
                                            variable=self.tier_var, value="small",
                                            command=self.change_model)
         self.small_radio.pack(anchor="w")
-        self.medium_radio = ttk.Radiobutton(models, text="Medium 识别优先 · Small 快速定位 + Medium 文字识别",
+        self.medium_radio = ttk.Radiobutton(models, text="Medium 识别优先 · Small 定位 + Medium 识字（批2实验）",
                                             variable=self.tier_var, value="medium",
                                             command=self.change_model)
         self.medium_radio.pack(anchor="w")
@@ -265,17 +266,37 @@ class ReaderApp:
         self.runtime_events = self.runtime_events[-70:]
 
     def prewarm_model(self, tier: str):
-        def work():
-            try:
-                ms = self.ocr_worker.prepare(tier)
-                self.events.put(("model_ready", tier, ms))
-            except Exception as exc:
-                self.events.put(("model_warm_error", tier, f"{type(exc).__name__}: {exc}"))
-        threading.Thread(target=work, name="ModelPreload", daemon=True).start()
+        # Debounce rapid radio clicks and let a near-immediate F8 take priority.
+        # Earlier queued warmups must not reload an obsolete OCR tier.
+        self._prewarm_serial += 1
+        serial = self._prewarm_serial
+
+        def still_current():
+            return (not self.closed and not self.busy and
+                    self._prewarm_serial == serial and self.settings["tier"] == tier)
+
+        def launch():
+            if not still_current():
+                return
+
+            def work():
+                try:
+                    ms = self.ocr_worker.prepare(tier, still_current=still_current)
+                    if ms is not None and still_current():
+                        self.events.put(("model_ready", tier, ms))
+                except Exception as exc:
+                    if still_current():
+                        self.events.put(("model_warm_error", tier,
+                                         f"{type(exc).__name__}: {exc}"))
+            threading.Thread(target=work, name="ModelPreload", daemon=True).start()
+
+        # F8 immediately after a mode switch starts the required model only
+        # once, inside the capture path; it does not compete with old warmups.
+        self.root.after(750, launch)
 
     def copy_runtime_log(self):
         info = [
-            "GameTextReader V1.6 | 仅数值与状态，不含截图和识别文字",
+            "GameTextReader V1.7 | 仅数值与状态，不含截图和识别文字",
             f"当前模型：{self.settings['tier']}",
             f"当前识别文字区域：{len(self.lines)}",
             f"广荣独立组件已准备：{bool(installed_x64_dll())}",
