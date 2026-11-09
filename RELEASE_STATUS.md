@@ -198,3 +198,14 @@
 - **尚未验证**：用户电脑上实际保益进程及广荣语音模块、声库路径和初始化方式。CI 上没有用户的保益悦听，也不可能据此宣称已找到实际内部语音驱动。此实验必须由用户在运行保益悦听的 Windows 电脑上打开小工具并点击「复制调查报告」，回传报告后才能判断。
 
 **使用**：打开电脑保益，维持平时的广荣音色并触发一次普通读屏朗读；新目录解压小工具，双击 `BaoYiVoiceInspector.exe` →「开始只读扫描」→「复制调查报告」→粘贴到对话。不要上传原音库、许可证或语音配置。调查工具没有依赖 BoyCtrl、不调用或打断保益语音、不会占用保益调速。正式 Windows GameTextReader V1.6、F8、绿色框、OCR 两档和音效没有修改；安卓仓库也没有修改。
+
+
+## 2026-11-09 · Windows V1.7 Medium 性能/预热调度实验（云端成功，电脑待验收）
+
+- **当前开发重点：** Windows 游戏截图 OCR + 鼠标指向朗读；安卓云端蓝星向导暂时搁置，安卓旧离线 OCR/CRAFT 已放弃。下一次优先阅读根目录短交接 `CURRENT_HANDOFF.md`，不必全文浏览本历史。
+- **代码来源与隔离：** 从 V1.6 源码分支 `game-text-reader-v16-guangrong-dll-fix-20261109` 的 `cb85f20b781cf529ab6247dfe210d92b78a93df5` 创建 `exp/windows-medium-latency-v17-20261109`。V1.7 实际构建 Commit `1e9c216d1bf5ec7f7cb7facc239375fcff64d525`，没有覆盖原稳定分支或安卓仓库。
+- **改动：** 保留 Small 参数与绿色坐标框、F8、60秒失效、Windows 与独立广荣语音模块；仅 Medium REC 使用 batch2 与 ONNX CPU 2线程（Small DET仍负责两档定位）；延迟/取消过期后台预热任务，新增锁等待、模型加载与推理分段计时。没有修改广荣 DLL/声音逻辑。
+- **事实测试：** Windows 2025 Runner 的 4行/18行合成菜单中，Medium batch6→2 的一轮约5%改善且文字与坐标一致；固定CPU2与自动线程反转顺序重测仅约3～4%改善（之前某单轮24～29%不稳定）。两轮绝对耗时波动较大，不能跨轮声称数倍提升或替代用户电脑实测。认定瓶颈仍主要是 Medium REC。测试报告见本实验 [Actions 42583872881](https://github.com/vobichngan285-collab/-/actions/runs/42583872881) 的两个性能报告 artifact。
+- **最终CI：** [42583872881](https://github.com/vobichngan285-collab/-/actions/runs/42583872881) **completed/success**，26项源码测试、Small/Medium真实权重OCR、冻结 EXE、无障碍绿框、系统语音合成与模拟 GuangrongHost PCM 通过；不能据此声称真人扬声器或官方广荣 DLL 可发声。
+- **实际交付：** [V1.7 Windows x64 ZIP 工件](https://github.com/vobichngan285-collab/-/actions/runs/42583872881/artifacts/13658427538)（30天保留）；内层 `GameTextReader_V1.7_Medium_CPU2_Windows_x64_Portable.zip`，194,448,729 bytes，SHA256 `df9a054ba44b041bc75b8906030bd41367d25a71dee96dcd346e54c3eef37287`。本轮已实际下载验证外层+内层 ZIP CRC、EXE、广荣宿主、OCR 模型和无第三方 grtts DLL。
+- **未完成 / 下一步：** 用户 Windows11 电脑安装同图对比 Small 与 Medium 的真实 F8 耗时、文字命中和朗读；若速度仍不能接受，再考虑其它 Medium 识别执行方案。广荣 `grtts_x64.dll` 官方独立加载 ERROR1114 问题**本轮没有修复**，可参考已完成只读 BaoYi 调查工具，等待真实电脑调查证据。不要再次重复旧模拟 PCM 或 Android CRAFT 实验。
