@@ -164,6 +164,9 @@ jobs:
       - name: Frozen EXE Guangrong native DLL loading regression test
         shell: pwsh
         run: |
+          # The fake DLL exists only on CI, outside the product package.
+          $env:GR_CI_FAKE_DLL_PATH = Join-Path $env:RUNNER_TEMP 'grtts_x64.dll'
+          Copy-Item (Join-Path $env:RUNNER_TEMP 'fake_grtts_x64.dll') $env:GR_CI_FAKE_DLL_PATH -Force
           $testLog = Join-Path $env:TEMP 'GameTextReader_guangrong_loader_selftest.txt'
           Remove-Item $testLog -Force -ErrorAction SilentlyContinue
           $exe = (Resolve-Path 'dist/GameTextReader/GameTextReader.exe').Path
