@@ -143,6 +143,19 @@ jobs:
           if (Test-Path game_reader/baoyi_speech.py) { throw 'Unexpected unfinished BaoYi adapter' }
           $binary = Get-ChildItem dist/GameTextReader -Recurse -Filter 'grtts*64.dll' -ErrorAction SilentlyContinue
           if ($binary) { throw 'Vendor DLL must be installed from original publisher on user action' }
+      - name: Frozen EXE Guangrong native DLL loading regression test
+        shell: pwsh
+        run: |
+          $testLog = Join-Path $env:TEMP 'GameTextReader_guangrong_loader_selftest.txt'
+          Remove-Item $testLog -Force -ErrorAction SilentlyContinue
+          $exe = (Resolve-Path 'dist/GameTextReader/GameTextReader.exe').Path
+          $process = Start-Process -FilePath $exe -ArgumentList '--self-test-guangrong-loader' -Wait -PassThru
+          if (-not (Test-Path $testLog)) { throw 'Frozen EXE Guangrong native loader selftest missing' }
+          $report = Get-Content $testLog -Raw
+          Write-Output $report
+          if (($process.ExitCode -ne 0) -or (-not $report.StartsWith('PASS'))) {
+            throw "Frozen Guangrong external native DLL loader regression (exit=$($process.ExitCode))"
+          }
       - name: Assemble ONLY portable ZIP
         shell: pwsh
         run: |
