@@ -61,12 +61,16 @@ class LocalOCR:
     Preload the selected tier in a background thread before the first F8. Model
     switch replaces it; one lock keeps prewarm and recognition from racing.
     """
-    def __init__(self, medium_rec_batch_num: int = 2):
+    def __init__(self, medium_rec_batch_num: int = 2,
+                 medium_ort_threads: int | None = None):
         # Only Medium REC batching is experimental. Small retains RapidOCR
         # defaults for a stable baseline and rapid F8 response.
         if not 1 <= medium_rec_batch_num <= 6:
             raise ValueError("Medium REC batch size must be between 1 and 6")
         self.medium_rec_batch_num = medium_rec_batch_num
+        if medium_ort_threads not in (None, 1, 2, 4, 8):
+            raise ValueError("Unsupported Medium ONNX CPU thread profile")
+        self.medium_ort_threads = medium_ort_threads
         self.loaded_tier: str | None = None
         self.engine = None
         self._warmed = False
@@ -99,6 +103,9 @@ class LocalOCR:
         }
         if tier == "medium":
             params["Rec.rec_batch_num"] = self.medium_rec_batch_num
+            if self.medium_ort_threads is not None:
+                # Trial-only setting; leaves the Small OCR session unchanged.
+                params["EngineConfig.onnxruntime.intra_op_num_threads"] = self.medium_ort_threads
         engine = RapidOCR(params=params)
         self.engine = engine
         self.loaded_tier = tier
@@ -162,6 +169,7 @@ class LocalOCR:
             "model_lock_wait_ms": model_lock_wait_ms,
             "model_load_ms": model_load_ms,
             "rec_batch_num": self.medium_rec_batch_num if tier == "medium" else 6,
+            "medium_ort_threads": self.medium_ort_threads if tier == "medium" else None,
             "convert_ms": convert_ms,
             "inference_ms": inference_ms,
             "parse_ms": parse_ms,
