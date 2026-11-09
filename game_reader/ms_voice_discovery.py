@@ -102,6 +102,33 @@ def choose_natural_voice(voice_id: str, installed: list[NaturalVoice]) -> Natura
     return next((v for v in installed if v.package.lower() == name), None)
 
 
+def inspect_local_voice_config(path: str) -> str:
+    """Safe local configuration preflight; do not return or log license content.
+
+    Distinguishes missing selection, inaccessible file, invalid JSON and
+    missing Voice.License. An 'ok' status checks presence, NOT authorization
+    or successful synthesis.
+    """
+    if not isinstance(path, str) or not path.strip():
+        return "local_voice_config_not_selected"
+    try:
+        blob = Path(path).read_bytes()
+    except FileNotFoundError:
+        return "local_voice_config_file_missing"
+    except OSError:
+        return "local_voice_config_unreadable"
+    try:
+        doc = json.loads(blob.decode("utf-8-sig"))
+    except (UnicodeError, ValueError):
+        return "local_voice_config_invalid_json"
+    if not isinstance(doc, dict):
+        return "local_voice_config_invalid_json"
+    value = doc.get("MicrosoftWindows.Voice.License", "")
+    if not isinstance(value, str) or not value:
+        return "local_voice_license_missing"
+    return "ok"
+
+
 def load_user_config(path: str) -> tuple[str, str]:
     """Load only required fields from the user's OWN local JSON. No key logging."""
     if not path:
