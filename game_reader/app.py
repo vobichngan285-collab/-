@@ -448,10 +448,19 @@ class ReaderApp:
         if self.closed or not self._choosing_region:
             return
         try:
+            background = None
+            try:
+                if self.overlay is not None:
+                    self.overlay.hide()
+                # Screenshot before opening the picker, with our main UI
+                # already invisible. No photo is stored or uploaded.
+                background = ImageGrab.grab(bbox=monitor, all_screens=True)
+            except Exception:
+                pass  # Fall back to a semi-transparent overlay if capture fails.
             self._region_picker = ScreenRegionPicker(
                 self.root, monitor,
                 RelativeRegion.from_settings(self.settings["region"]),
-                self._region_picked)
+                self._region_picked, background=background)
             self._region_picker.lift()
         except Exception as exc:
             self._region_picked(None)
