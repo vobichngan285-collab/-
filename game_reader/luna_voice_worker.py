@@ -84,19 +84,52 @@ def process_request(request: dict, synthesize=synthesize_with_installed_voice) -
 
 
 def main() -> int:
-    try:
-        # The GUI sends UTF-8 JSON via subprocess.Popen(encoding="utf-8").
-        # A frozen --windowed EXE on Windows may default sys.stdin to a
-        # legacy code page (e.g. cp1252). Text readline() silently mangles
-        # Chinese characters in local paths, turning real files into
-        # "not found". Decode bytes explicitly with the SAME UTF-8 codec.
-        raw = sys.stdin.buffer.readline(MAX_TEXT * 4 + 12000)
-        request = json.loads(raw.decode("utf-8-sig"))
-        reply = process_request(request)
-    except (ValueError, TypeError, json.JSONDecodeError):
-        reply = {"ok": False, "stage": "request", "code": "invalid_request_json"}
-    print(json.dumps(reply, ensure_ascii=False), flush=True)
-    return 0 if reply.get("ok") else 2
+    """Serve newline-framed requests until EOF; keep Luna engine alive.
+
+    This replaces a new Python+Luna process per speech request with a single
+    session. It is still local and uses the original unmodified author EXE.
+    """
+    from .natural_voice_session import NaturalVoiceSession
+    with NaturalVoiceSession() as session:
+        while True:
+            try:
+                raw = sys.stdin.buffer.readline(MAX_TEXT * 4 + 12000)
+                if not raw:
+                    break
+                request = json.loads(raw.decode("utf-8-sig"))
+                if not isinstance(request, dict):
+                    reply = {"ok": False, "stage": "request",
+                             "code": "invalid_request_json"}
+                elif request.get("command") == "exit":
+                    break
+                elif request.get("command") == "prepare":
+                    try:
+                        config_path = request.get("config_path", "")
+                        voice_id = request.get("voice_id", "")
+                        session.prepare(config_path, voice_id)
+                        reply = {"ok": True, "stage": "voice_ready",
+                                 "code": "native_engine_reused_or_ready"}
+                    except VoiceSetupError as exc:
+                        reply = {"ok": False, "stage": "discovery_or_setup", "code": exc.code}
+                    except FileNotFoundError:
+                        reply = {"ok": False, "stage": "native_engine",
+                                 "code": "original_luna_engine_missing"}
+                    except (TimeoutError, OSError):
+                        reply = {"ok": False, "stage": "native_engine",
+                                 "code": "native_engine_initialization_failed"}
+                    except Exception:
+                        reply = {"ok": False, "stage": "native_engine",
+                                 "code": "native_engine_unexpected_failure"}
+                else:
+                    reply = process_request(request, synthesize=session.synthesize)
+            except (ValueError, TypeError, UnicodeError):
+                reply = {"ok": False, "stage": "request", "code": "invalid_request_json"}
+            except Exception:
+                reply = {"ok": False, "stage": "unexpected", "code": "worker_error"}
+            # ASCII-only framing prevents Windows console code pages from
+            # corrupting stdout; no private paths/license values are returned.
+            print(json.dumps(reply, ensure_ascii=True), flush=True)
+    return 0
 
 
 if __name__ == "__main__":
