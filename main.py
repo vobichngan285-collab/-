@@ -273,103 +273,81 @@ def packaged_guangrong_loader_selftest() -> int:
 
 
 def packaged_luna_selftest() -> int:
-    """Frozen EXE: prove original JSON fields feed the SDK adapter exactly.
+    """Frozen EXE: official upstream bytes + original JSON + isolated worker.
 
-    CI has no Yunxi/Xiaoxiao model and must never claim a natural WAV.
-    The bundled Microsoft SDK must be importable, and the EXE worker callable.
+    We have no Yunxi/Xiaoxiao model on CI: never claim natural audio output.
     """
+    import hashlib
     import json
-    from pathlib import Path
     import subprocess
     import tempfile
+    from pathlib import Path
     import traceback
-    from types import SimpleNamespace
+    from game_reader.luna_natural_voice import load_original_config, make_ssml
+    from game_reader.upstream_luna_pipe import (
+        original_engine_path, make_exact_luna_argv
+    )
 
     log = Path(tempfile.gettempdir()) / "GameTextReader_luna_selftest.txt"
     try:
-        import azure.cognitiveservices.speech as speechsdk
-        assert hasattr(speechsdk, "EmbeddedSpeechConfig")
-        assert hasattr(speechsdk.PropertyId, "SpeechServiceConnection_SynthModelKey")
-        assert hasattr(speechsdk.SpeechSynthesisOutputFormat, "Riff24Khz16BitMonoPcm")
-        from game_reader.luna_natural_voice import (
-            load_original_config, synthesize_exact_config
-        )
-        with tempfile.TemporaryDirectory(prefix="GTR_luna_CI_") as folder:
+        official = original_engine_path()
+        assert official.is_file(), "Official verbatim LunaSubprocess64.exe is missing"
+        expected_hash = ("886892cd78cdd8bbd029a3f4977853cc1ddce1c9723e656986fa8b5a79e6a974")
+        assert hashlib.sha256(official.read_bytes()).hexdigest() == expected_hash
+        upstream = official.parent / "upstream_luna_original"
+        for rel in ("windowstts.py", "LunaSubProcess.py",
+                    "msnaturalvoice.cpp", "pipehost.hpp", "LICENSE"):
+            assert (upstream / rel).is_file(), "Missing upstream source: " + rel
+        assert (official.parent / "UPSTREAM_LUNA_GPL_SOURCE_v12.1.3.9.zip").is_file()
+
+        with tempfile.TemporaryDirectory(prefix="GTR_exact_original_") as folder:
             root = Path(folder)
-            dummy = root / "MicrosoftWindows.Voice.zh-CN.Yunxi.FAKE"
-            dummy.mkdir()
-            license_text = "EXAMPLE DATA ONLY: keep   spaces\n and newlines."
-            original = root / "config..json"
-            original.write_text(json.dumps({
-                "reader": {"windowstts": {"use": True, "name": "WindowsTTS",
-                                        "voice": [1, str(dummy)]}},
-                "MicrosoftWindows.Voice.License": license_text,
-                "MicrosoftWindows.Speech.License": "other unrelated field"
-            }, ensure_ascii=False), encoding="utf-8")
+            fake_model = root / "MicrosoftWindows.Voice.zh-CN.Yunxi.TEST"
+            fake_model.mkdir()
+            notice = "A local example string\n preserve   spaces \n"
+            config = root / "config..json"
+            config.write_text(json.dumps({
+                "reader":{"windowstts":{"use":True,"voice":[1,str(fake_model)]}},
+                "MicrosoftWindows.Voice.License":notice,
+                "MicrosoftWindows.Speech.License":"separate notice"
+            },ensure_ascii=False),encoding="utf-8")
+            original_bytes = config.read_bytes()
+            selected = load_original_config(config)
+            assert selected.license_text == notice
+            assert selected.model_path == str(fake_model)
+            command = make_exact_luna_argv(
+                official, r"\\.\Pipe\unit", "event", "map",
+                selected.model_path, "example_sdk_dir", selected.license_text)
+            assert command[1] == "msnaturalvoice" and command[-1] == notice
+            assert "rate='-15%'" in make_ssml("你好 & 云希", -3)
+            assert config.read_bytes() == original_bytes
 
-            selection = load_original_config(original)
-            assert selection.license_text == license_text
-            calls = []
-            audio = b"RIFF" + b"\0" * 4 + b"WAVE" + b"\0" * 2048
-
-            class FakeConfig:
-                @classmethod
-                def from_path(cls, path):
-                    calls.append(("model", path))
-                    return cls()
-                def set_property(self, field, value):
-                    calls.append(("license", field, value))
-                def set_speech_synthesis_output_format(self, value):
-                    calls.append(("format", value))
-                def get_speech_config(self):
-                    return self
-
-            class FakeSynth:
-                def __init__(self, speech_config, audio_config):
-                    pass
-                def speak_ssml_async(self, text):
-                    calls.append(("speak_ssml", text))
-                    return SimpleNamespace(get=lambda: SimpleNamespace(
-                        reason="ok", audio_data=audio))
-
-            fake_sdk = SimpleNamespace(
-                EmbeddedSpeechConfig=FakeConfig,
-                PropertyId=SimpleNamespace(
-                    SpeechServiceConnection_SynthModelKey="model-key"),
-                SpeechSynthesisOutputFormat=SimpleNamespace(
-                    Riff24Khz16BitMonoPcm="24k"),
-                SpeechSynthesizer=FakeSynth,
-                ResultReason=SimpleNamespace(
-                    SynthesizingAudioCompleted="ok"))
-            assert synthesize_exact_config(
-                original, "你好，云希", speechsdk=fake_sdk) == audio
-            assert calls[1] == ("license", "model-key", license_text)
-
-            # Test actual frozen subprocess entrypoint without model access.
-            missing_dir = root / "missing_voice_model"
-            config_bad = root / "missing.json"
-            config_bad.write_text(json.dumps({
-                "reader":{"windowstts":{"use":True,"voice":[1,str(missing_dir)]}},
-                "MicrosoftWindows.Voice.License":license_text
+            # Frozen app's isolated worker must respond without leaking
+            # the original JSON; no installed model is provided on CI.
+            badfile = root / "missing.json"
+            badfile.write_text(json.dumps({
+                "reader":{"windowstts":{"use":True,
+                           "voice":[1,str(root/"nonexistent_model")]}},
+                "MicrosoftWindows.Voice.License": notice
             }),encoding="utf-8")
-            child = subprocess.run(
-                [sys.executable, "--luna-worker"],
-                input=json.dumps({"command":"speak",
-                                  "config_path":str(config_bad),"text":"你好"}),
-                capture_output=True, text=True, timeout=30)
-            response = json.loads(child.stdout.strip())
-            assert response.get("error") == "voice_package_unavailable"
-            assert license_text not in child.stdout
-            assert str(config_bad) not in child.stdout
+            result = subprocess.run([sys.executable,"--luna-worker"],
+                input=json.dumps({"command":"speak","config_path":str(badfile),
+                                  "text":"你好"}),
+                capture_output=True,text=True,timeout=30)
+            response = json.loads(result.stdout.strip())
+            assert response.get("error") == "voice_package_unavailable", response
+            assert notice not in result.stdout and str(badfile) not in result.stdout
 
-        log.write_text("PASS\nFrozen SDK imports, exact Luna config property, "
-                       "and private isolated process tested; actual natural "
-                       "WAV unavailable without installed voice model.",
-                       encoding="utf-8")
+        log.write_text(
+            "PASS\nVerbatim official LunaSubprocess64.exe SHA256 verified; "
+            "unmodified original source files bundled; original config field "
+            "and independent worker passed. Actual Yunxi WAV not tested on CI.",
+            encoding="utf-8")
         return 0
     except BaseException:
-        log.write_text("FAIL\n" + traceback.format_exc(), encoding="utf-8")
+        log.write_text("FAIL\n" + traceback.format_exc(),encoding="utf-8")
         return 1
+
 
 
 if __name__ == "__main__":
