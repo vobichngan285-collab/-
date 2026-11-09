@@ -1,0 +1,39 @@
+name: Probe Guangrong 32 and 64 bit DLL without NVDA
+on:
+  workflow_dispatch:
+  push:
+    branches: ["game-text-reader-v16-guangrong-dll-fix-*"]
+    paths: [".github/workflows/probe-guangrong-arch.yml", "tools/probe_grtts_arch.py"]
+jobs:
+  dll:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          architecture: "x64"
+      - name: Download unmodified original publisher archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $u = "https://github.com/shenguangrong/grtts_nvda_plugin/releases/download/1.1.0/grtts.nvda-addon"
+          Invoke-WebRequest -Uri $u -OutFile "$env:RUNNER_TEMP/original.nvda-addon"
+          python -c "import hashlib,os; p=os.environ['RUNNER_TEMP']+'/original.nvda-addon'; assert hashlib.sha256(open(p,'rb').read()).hexdigest()=='14ba0d4155549a1e4b76335687c960815c87e16f3e34907e1476d206c3609a77'"
+          python -c "import zipfile,os; z=zipfile.ZipFile(os.environ['RUNNER_TEMP']+'/original.nvda-addon'); assert z.testzip() is None; z.extractall(os.environ['RUNNER_TEMP']+'/original')"
+      - name: Native publisher x64 DLL probe
+        shell: pwsh
+        run: |
+          python tools/probe_grtts_arch.py "$env:RUNNER_TEMP/original/synthDrivers"
+          Write-Output "x64 native probe exit=$LASTEXITCODE"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          architecture: "x86"
+      - name: Native publisher x86 DLL probe
+        shell: pwsh
+        run: |
+          python -c "import struct; assert struct.calcsize('P')==4"
+          python tools/probe_grtts_arch.py "$env:RUNNER_TEMP/original/synthDrivers"
+          Write-Output "x86 native probe exit=$LASTEXITCODE"
