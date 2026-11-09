@@ -2,7 +2,7 @@ name: Build V1.2 Small OCR with Windows-discovered installed natural voices
 on:
   workflow_dispatch:
   push:
-    branches: ['exp/v12-small-hover-ocr-mouse-hotkeys-20261109']
+    branches: ['exp/v12-small-hover-ocr-picker-pointer-fix-20261110']
     paths:
       - 'game_reader/**'
       - 'main.py'
@@ -194,6 +194,20 @@ jobs:
                   assert "FAKE_TEST_VALUE_NOT_A_LICENSE" not in str(answer)
                   assert path not in str(answer)
               print("PASS frozen worker config read with Unicode path and redacted results")
+          # New protocol must read TWO independent requests with one frozen
+          # worker process; before this revision each utterance restarted it.
+          with TemporaryDirectory(prefix="GameTextReader_热语音_") as local:
+              config = Path(local) / "config.json"
+              config.write_text(json.dumps({"MicrosoftWindows.Voice.License":
+                                            "FAKE_TEST_VALUE_NOT_A_LICENSE"}), encoding="utf-8")
+              queries = [{"command":"check_config", "config_path":str(config)} for _ in range(2)]
+              wire = "".join(json.dumps(q, ensure_ascii=False)+"\n" for q in queries)
+              result = subprocess.run([exe, "--luna-worker"], input=wire,
+                  capture_output=True, text=True, encoding="utf-8", timeout=25)
+              replies = [json.loads(line) for line in result.stdout.splitlines()]
+              assert len(replies) == 2, replies
+              assert all(x == {"ok":True, "stage":"config_read", "code":"ok"} for x in replies)
+              print("PASS frozen worker handles two requests in same process")
           '@ | python -
           if ($LASTEXITCODE -ne 0) { throw 'Frozen natural voice worker failed' }
           if (Test-Path 'dist/GameTextReader/config..json') {
@@ -235,12 +249,12 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory release -Force | Out-Null
-          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_V12Base_MouseHover_SideHotkeys_Experimental_x64.zip -CompressionLevel Optimal -Force
-          $size = (Get-Item release/GameTextReader_V12Base_MouseHover_SideHotkeys_Experimental_x64.zip).Length
+          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_V12_PickerPointerFastVoice_Experimental_x64.zip -CompressionLevel Optimal -Force
+          $size = (Get-Item release/GameTextReader_V12_PickerPointerFastVoice_Experimental_x64.zip).Length
           Write-Output "Portable archive size: $size bytes"
       - uses: actions/upload-artifact@v4
         with:
-          name: GameTextReader-V12Base-MouseHover-SideHotkeys-Experimental
-          path: release/GameTextReader_V12Base_MouseHover_SideHotkeys_Experimental_x64.zip
+          name: GameTextReader-V12-PickerPointerFastVoice-Experimental
+          path: release/GameTextReader_V12_PickerPointerFastVoice_Experimental_x64.zip
           if-no-files-found: error
           retention-days: 30
