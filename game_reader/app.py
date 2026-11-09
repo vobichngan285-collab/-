@@ -643,7 +643,7 @@ class ReaderApp:
             self.status("无法获取显示器尺寸：" + type(exc).__name__)
             return
         self._choosing_region = True
-        if self.scan_frame is not None:
+        if getattr(self, "scan_frame", None) is not None:
             self.scan_frame.hide()
         # Cancel old queued OCR/audio before putting the selection overlay
         # on screen. Any image already being processed must be discarded.
@@ -720,7 +720,7 @@ class ReaderApp:
         self.speech.stop()
         if self.overlay is not None:
             self.overlay.hide()
-        if self.scan_frame is not None:
+        if getattr(self, "scan_frame", None) is not None:
             self.scan_frame.hide()
         # Announcements are sent unfiltered, through the already-selected
         # voice. Reserve enough time before OCR can interrupt the short cue.
@@ -1183,7 +1183,7 @@ class ReaderApp:
                 pass
         self.speech.shutdown()
         self.cues.shutdown()
-        if self.scan_frame is not None:
+        if getattr(self, "scan_frame", None) is not None:
             self.scan_frame.close()
         if self.overlay is not None:
             self.overlay.close()
