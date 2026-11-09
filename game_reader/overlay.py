@@ -100,8 +100,11 @@ def _register():
 
 
 class ClickThroughOutline:
-    def __init__(self):
+    def __init__(self, *, alpha: int = 220, padding: int = 4, thickness: int = 3):
         _register()
+        self.alpha = max(16, min(255, int(alpha)))
+        self.padding = max(0, min(20, int(padding)))
+        self.thickness = max(1, min(8, int(thickness)))
         self.handles = []
         self._current = None
         instance = kernel32.GetModuleHandleW(None)
@@ -115,7 +118,7 @@ class ClickThroughOutline:
             if not hwnd:
                 self.close()
                 raise ctypes.WinError(ctypes.get_last_error())
-            if not user32.SetLayeredWindowAttributes(hwnd, 0, 220, LWA_ALPHA):
+            if not user32.SetLayeredWindowAttributes(hwnd, 0, self.alpha, LWA_ALPHA):
                 user32.DestroyWindow(hwnd)
                 self.close()
                 raise ctypes.WinError(ctypes.get_last_error())
@@ -130,7 +133,7 @@ class ClickThroughOutline:
         if self._current == rect:
             return
         self._current = rect
-        pad, thick = 4, 3
+        pad, thick = self.padding, self.thickness
         left, top, right, bottom = rect
         left -= pad; top -= pad; right += pad; bottom += pad
         width, height = max(10, right - left), max(10, bottom - top)
