@@ -230,8 +230,14 @@ class ReaderApp:
         modes = section(mouse, "工作模式")
         self.mouse_mode_var = tk.StringVar(
             value="当前：默认模式（按 F9 切换到鼠标模式）")
-        card_label(modes, "鼠标模式：局部 OCR 跟随鼠标，默认模式：全屏文字指向朗读").pack(
-            anchor="w", pady=(0, 6))
+        choose = row(modes, 2)
+        self.mouse_mode_button = ttk.Button(
+            choose, text="鼠标模式", style="Accent.TButton",
+            command=lambda: self.set_mouse_mode("hover"))
+        self.mouse_mode_button.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        self.default_mode_button = ttk.Button(
+            choose, text="默认模式", command=lambda: self.set_mouse_mode("pointer"))
+        self.default_mode_button.pack(side="left", fill="x", expand=True, padx=(6, 0))
         ttk.Label(modes, textvariable=self.mouse_mode_var, style="CardMuted.TLabel").pack(
             anchor="w", pady=(0, 4))
         hotkeys = row(modes)
@@ -297,6 +303,15 @@ class ReaderApp:
         self.similarity_spin.bind("<FocusOut>", self.save_similarity)
         self.similarity_spin.bind("<Return>", self.save_similarity)
         note(timing, "短物品名只过滤完全相同的文字；长段落可容忍少量识别抖动。")
+        action_row = ttk.Frame(mouse)
+        action_row.pack(fill="x", pady=(3, 0))
+        self.reset_mouse_button = ttk.Button(
+            action_row, text="恢复默认", command=self.reset_mouse_preferences)
+        self.reset_mouse_button.pack(side="left")
+        self.apply_mouse_button = ttk.Button(
+            action_row, text="应用设置", style="Accent.TButton",
+            command=self.apply_mouse_settings)
+        self.apply_mouse_button.pack(side="right")
 
         voice = self._pages["voice"]
         voice_frame = section(voice, "本地系统语音")
@@ -470,6 +485,39 @@ class ReaderApp:
         self.persist()
         self.status(f"文本相似度阈值已设置为 {value}。")
 
+    def set_mouse_mode(self, desired: str):
+        if desired not in ("pointer", "hover"):
+            raise ValueError("未知鼠标模式")
+        if self.mouse_mode != desired:
+            self.toggle_mouse_mode()
+
+    def apply_mouse_settings(self):
+        try:
+            period = parse_period_ms(self.period_var.get())
+            threshold = similarity_threshold(self.similarity_var.get())
+        except ValueError as exc:
+            self.status(str(exc))
+            return False
+        self.settings["period_ms"] = period
+        self.settings["similarity_threshold"] = threshold
+        self._hover_next_due = time.monotonic() + period / 1000.0
+        self.save_visual_settings()
+        self.status("设置已应用：鼠标扫描、去重、模式语音和边框设置已保存。")
+        return True
+
+    def reset_mouse_preferences(self):
+        """Reset mouse *preferences*, not voice license, saved hotkeys or OCR."""
+        self.period_var.set("400")
+        self.similarity_var.set("2")
+        self.mode_voice_var.set(True)
+        self.show_frame_var.set(True)
+        self.similarity_enabled_var.set(True)
+        self.settings["region"] = centered_region(
+            RelativeRegion.from_settings(DEFAULT_REGION)).as_list()
+        self.region_info_var.set(self.format_region(
+            RelativeRegion.from_settings(self.settings["region"])))
+        self.apply_mouse_settings()
+
     def enable_accessibility(self):
         """Name native controls for Windows UIA; fail explicit self-test if lost."""
         try:
@@ -477,6 +525,10 @@ class ReaderApp:
             result = tk_uia.enable(self.root)
             targets = [
                 (self.key_button, "全屏 OCR 截图快捷键"),
+                (self.mouse_mode_button, "切换到鼠标模式"),
+                (self.default_mode_button, "切换到默认模式"),
+                (self.apply_mouse_button, "应用并保存鼠标 OCR 设置"),
+                (self.reset_mouse_button, "恢复鼠标设置默认值，不清除语音授权"),
                 (self.mode_key_button, "切换默认模式和鼠标模式的快捷键"),
                 (self.local_key_button, "立即识别鼠标附近文字的快捷键"),
                 (self.pick_key_button, "全局暗屏调整鼠标扫描宽高的快捷键"),
