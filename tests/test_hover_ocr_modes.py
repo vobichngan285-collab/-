@@ -346,6 +346,10 @@ def test_global_picker_reopens_repeatedly_after_cancel_on_real_windows(monkeypat
     app._region_picker = None
     app._region_previous_root_state = "normal"
     app._hover_last_text = ""
+    app._hover_spoken_cursor = None
+    app.mode_generation = 0
+    from types import SimpleNamespace
+    app.speech = SimpleNamespace(stop=lambda: None)
     app.settings = {"region": [-300, -140, 600, 400], "period_ms": 500}
     app.region_info_var = tk.StringVar(master=root, value="old")
     app.status = lambda message: None
