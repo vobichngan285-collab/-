@@ -30,6 +30,20 @@ def run(directory: str):
     except ImportError:
         print("PE_IMPORT_SKIP",flush=True)
     os.chdir(root)
+    scenario = os.environ.get("GR_INIT_SCENARIO", "plain")
+    if scenario in ("COM_STA", "COM_MTA", "WINRT_MTA"):
+        ole=ctypes.WinDLL("ole32",use_last_error=True)
+        ole.CoInitializeEx.argtypes=[ctypes.c_void_p,ctypes.c_uint32]
+        ole.CoInitializeEx.restype=ctypes.c_long
+        rc=ole.CoInitializeEx(None,2 if scenario=="COM_STA" else 0)
+        print("PREINIT_COM",scenario,hex(rc&0xffffffff),flush=True)
+        if scenario=="WINRT_MTA":
+            api=ctypes.WinDLL("combase",use_last_error=True)
+            api.RoInitialize.argtypes=[ctypes.c_int]
+            api.RoInitialize.restype=ctypes.c_long
+            hr=api.RoInitialize(1)
+            print("PREINIT_WINRT",hex(hr&0xffffffff),flush=True)
+    print("INIT_SCENARIO",scenario,flush=True)
     cookie=os.add_dll_directory(str(root))
     kernel=ctypes.windll.kernel32
     # Test real LoadLibraryEx on explicitly selected publisher DLL.
