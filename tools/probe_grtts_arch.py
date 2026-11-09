@@ -20,6 +20,15 @@ def run(directory: str):
     print("DLL_NAME",dll.name, "EXISTS",dll.exists(),flush=True)
     if not dll.exists():return 2
     print("DLL_BYTES",dll.stat().st_size,flush=True)
+    try:
+        import pefile
+        for cand in sorted(root.glob("*.dll")):
+            if cand.name.lower() in ("grtts.dll","grtts_x64.dll","msc.dll","msc_x64.dll","speechsdkshim.dll","microsoft.cognitiveservices.speech.core.dll"):
+                pe=pefile.PE(str(cand),fast_load=False)
+                imported=[imp.dll.decode(errors="replace") for imp in getattr(pe,"DIRECTORY_ENTRY_IMPORT",[])]
+                print("PE_MACHINE",cand.name,hex(pe.FILE_HEADER.Machine),"IMPORTS",imported,flush=True)
+    except ImportError:
+        print("PE_IMPORT_SKIP",flush=True)
     os.chdir(root)
     cookie=os.add_dll_directory(str(root))
     kernel=ctypes.windll.kernel32
