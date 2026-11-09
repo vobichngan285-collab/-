@@ -96,7 +96,7 @@ def test_negative_monitor_coordinates_and_screen_edge_clamping():
         -400, 780, 0, 1080)
 
 
-def test_desktop_center_crop_scans_even_when_progman_is_foreground(monkeypatch):
+def test_desktop_relative_crop_scans_even_when_progman_is_foreground(monkeypatch):
     """Desktop exclusion was the wrong policy; nearby icons must be eligible."""
     import threading
     from PIL import Image
@@ -132,7 +132,7 @@ def test_desktop_center_crop_scans_even_when_progman_is_foreground(monkeypatch):
             seen["origin"] = origin
             seen["size"] = img.size
             seen["model"] = tier
-            return [OCRLine("DLSS", 520, 546, 605, 572)]
+            return [OCRLine("DLSS", 790, 730, 865, 760)]
 
     app.ocr_worker = OCR()
     app._ocr_lock = threading.Lock()
@@ -149,14 +149,14 @@ def test_desktop_center_crop_scans_even_when_progman_is_foreground(monkeypatch):
 
     assert app.start_hover_ocr(False)
     assert seen == {
-        "origin": (240, 300),
+        "origin": (740, 680),
         "size": (600, 400),
         "model": "small",
-        "box": (240, 300, 840, 700),
+        "box": (740, 680, 1340, 1080),
     }
     event = app.events.get_nowait()
     assert event[0] == "hover_ok"
-    assert event[-2:] == ((540, 500), "Progman")
+    assert event[5:7] == ((540, 500), "Progman")
 
 
 def test_same_text_can_be_reidentified_at_new_cursor_location():
