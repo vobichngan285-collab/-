@@ -1,0 +1,30 @@
+name: Verify actual official Guangrong DLL in standalone host
+on:
+  workflow_dispatch:
+  push:
+    branches: ["game-text-reader-v16-guangrong-dll-fix-*"]
+    paths:
+      - "native/guangrong_host.cpp"
+      - "tools/probe_real_grtts_host.py"
+      - ".github/workflows/probe-real-grtts.yml"
+jobs:
+  probe:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Build isolated native voice process
+        shell: pwsh
+        run: |
+          cl /nologo /MT /O2 /EHsc /std:c++17 /Fe:"$env:RUNNER_TEMP/GuangrongHost.exe" native/guangrong_host.cpp
+          if ($LASTEXITCODE -ne 0) { throw "Failed to compile independent host" }
+      - name: Download unmodified publisher archive
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/shenguangrong/grtts_nvda_plugin/releases/download/1.1.0/grtts.nvda-addon" -OutFile "$env:RUNNER_TEMP/grtts.nvda-addon"
+      - name: Probe original x64 DLL through native host
+        shell: pwsh
+        run: |
+          python tools/probe_real_grtts_host.py "$env:RUNNER_TEMP/grtts.nvda-addon" "$env:RUNNER_TEMP/GuangrongHost.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Real DLL probe errored" }
