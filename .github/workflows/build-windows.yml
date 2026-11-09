@@ -60,7 +60,7 @@ jobs:
       - name: Build independent Guangrong x64 voice host (NO vendor binaries)
         shell: pwsh
         run: |
-          cl /nologo /O2 /EHsc /std:c++17 /Fe:dist/GameTextReader/GuangrongHost.exe native/guangrong_host.cpp
+          cl /nologo /MT /O2 /EHsc /std:c++17 /Fe:dist/GameTextReader/GuangrongHost.exe native/guangrong_host.cpp
           if ($LASTEXITCODE -ne 0) { throw 'Independent native TTS helper did not compile' }
           if (-not (Test-Path dist/GameTextReader/GuangrongHost.exe)) { throw 'Native helper EXE missing' }
       - name: Exercise standalone helper with CI-only fake voice
