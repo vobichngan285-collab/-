@@ -14,7 +14,7 @@ import traceback
 import tkinter as tk
 from pathlib import Path
 from queue import Empty, Queue
-from tkinter import ttk
+from tkinter import ttk, filedialog
 
 from .core import HoverTracker, OCRLine, hit_test, build_reading_regions
 from .ocr_backend import LocalOCR
@@ -24,12 +24,14 @@ from .voice_info import preferred_voice_index, narrator_package_names, voice_dia
 from .cues import CuePlayer
 from .guangrong_tts import list_guangrong_voices, chosen_dll_path
 from .guangrong_setup import install_official_guangrong, installed_x64_dll
+from .luna_natural_voice import load_original_config, safe_diagnostic
 
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "GameTextReader"
 CONFIG_PATH = CONFIG_DIR / "settings.json"
 ERROR_LOG = CONFIG_DIR / "last_ocr_error.txt"
 DEFAULTS = {"vk": 0x77, "hotkey_label": "F8", "tier": "small", "voice": "",
-            "rate": 0, "volume": 100, "dwell_ms": 0, "guangrong_dir": ""}
+            "rate": 0, "volume": 100, "dwell_ms": 0, "guangrong_dir": "",
+            "luna_config": ""}
 MODIFIER_KEYS = {16, 17, 18, 91, 92}
 RESULT_TTL_SECONDS = 60.0
 
@@ -63,12 +65,20 @@ def write_settings(settings: dict) -> None:
 class ReaderApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        root.title("游戏文字助手 V1.8 · Small OCR 与保益语音调查")
+        root.title("游戏文字助手 V1.9 实验 · Luna 原配置自然语音")
         root.geometry("690x720")
         root.minsize(610, 650)
         root.protocol("WM_DELETE_WINDOW", self.close)
 
         self.settings = read_settings()
+        if not self.settings.get("luna_config"):
+            # A copy of the Bilibili author's JSON may sit next to the EXE.
+            # Read it in place, do not rewrite or upload its contents.
+            program_dir = (Path(sys.executable).parent if getattr(sys, "frozen", False)
+                           else Path(__file__).resolve().parents[1])
+            candidate = program_dir / "config..json"
+            if candidate.is_file():
+                self.settings["luna_config"] = str(candidate)
         local_dll = installed_x64_dll()
         # Strictly independent engine. Never bind to the user's running
         # screen reader or its installed engine directory.
@@ -98,6 +108,7 @@ class ReaderApp:
             on_error=lambda e: self.events.put(("tts_error", e)),
             on_event=lambda e: self.events.put(("audio_event", e)))
         self.speech.set_guangrong_directory(self.settings.get("guangrong_dir", ""))
+        self.speech.set_luna_config(self.settings.get("luna_config", ""))
         self.speech.set_rate(self.settings["rate"])
         self.speech.set_volume(self.settings["volume"])
         self.cues = CuePlayer(
@@ -121,7 +132,7 @@ class ReaderApp:
     def create_widgets(self):
         p = ttk.Frame(self.root, padding=12)
         p.pack(fill="both", expand=True)
-        ttk.Label(p, text="游戏文字助手 V1.8 · Small OCR 与保益语音调查",
+        ttk.Label(p, text="游戏文字助手 V1.9 实验 · Luna 原配置自然语音",
                   font=("Microsoft YaHei UI", 16, "bold")).pack(anchor="w")
         ttk.Label(p, text="按 F8 截图识别，鼠标进入文字区域立刻朗读；"
                   "按 F8 更新旧结果，识别结果最多保留 60 秒。",
@@ -138,7 +149,7 @@ class ReaderApp:
         models.pack(fill="x", pady=3)
         ttk.Label(models, text="PP-OCRv6 Small（唯一引擎，保留快速识别）").pack(anchor="w")
 
-        voice_frame = ttk.LabelFrame(p, text="独立本地朗读（广荣 TTS / Windows 语音）", padding=8)
+        voice_frame = ttk.LabelFrame(p, text="离线朗读（Luna 自然语音实验 / Windows / 广荣）", padding=8)
         voice_frame.pack(fill="x", pady=3)
         self.voice_var = tk.StringVar(value="正在扫描本地语音...")
         self.voice_select = ttk.Combobox(voice_frame, textvariable=self.voice_var,
@@ -173,7 +184,17 @@ class ReaderApp:
         self.system_test_button.pack(side="left", padx=6)
         ttk.Label(gr_row, text="单独安装到本软件目录，不使用保益通道。").pack(side="left")
 
-        self.voice_note = tk.StringVar(value="初次点击“一键准备独立广荣”，不需要找 DLL；自然语音包不随基础插件提供。")
+        natural_row = ttk.Frame(voice_frame)
+        natural_row.pack(fill="x", pady=(5, 0))
+        self.import_luna_button = ttk.Button(
+            natural_row, text="导入原作者 config..json（不修改原文件）",
+            command=self.import_luna_original)
+        self.import_luna_button.pack(side="left")
+        ttk.Label(natural_row, text="读取原始 Voice.License + 云希路径；本机离线使用。").pack(
+            side="left", padx=6)
+
+        self.voice_note = tk.StringVar(value="可导入原作者的 JSON 语音配置直接尝试 SDK 自然语音；"
+                                      "不保证第三方模型授权或运行时可用。")
         self.voice_note_label = ttk.Label(voice_frame, textvariable=self.voice_note,
                                           wraplength=560)
         self.voice_note_label.pack(anchor="w", pady=(5, 0))
@@ -238,6 +259,7 @@ class ReaderApp:
             for widget, label in (
                 (self.key_button, "设置单键截图快捷键"),
                 (self.voice_select, "选择本地 TTS 声音"),
+                (self.import_luna_button, "导入原作者原样 JSON 语音配置"),
                 (self.grtts_button, "下载并安装广荣官方组件到游戏文字助手的独立目录"),
                 (self.cue_test_button, "试听本程序提示音"),
                 (self.system_test_button, "试听 Windows 系统提示音"),
@@ -288,13 +310,15 @@ class ReaderApp:
 
     def copy_runtime_log(self):
         info = [
-            "GameTextReader V1.8 | 仅数值与状态，不含截图和识别文字",
+            "GameTextReader V1.9 Luna 实验 | 仅数值与状态，不含截图、配置许可文字和识别文字",
             f"当前模型：{self.settings['tier']}",
             f"当前识别文字区域：{len(self.lines)}",
             f"广荣独立组件已准备：{bool(installed_x64_dll())}",
             f"OCR 是否仍在运行：{self.busy}",
             f"当前选择的 TTS ID：{self.settings.get('voice') or '自动'}",
             f"广荣 DLL 已选择：{bool(chosen_dll_path(self.settings.get('guangrong_dir','')))}",
+            "Luna 原始配置状态：" + str(safe_diagnostic(self.settings["luna_config"]))
+            if self.settings.get("luna_config") else "Luna 原始配置：未导入",
             "最近 OCR 阶段耗时：" + str(self.last_ocr_metrics),
             "最近事件：",
             *self.runtime_events[-70:],
@@ -360,6 +384,27 @@ class ReaderApp:
                 self.events.put(("gr_install_fail", type(exc).__name__ + ": " + str(exc)[:260]))
         threading.Thread(target=work, name="OfficialGuangrongSetup", daemon=True).start()
 
+    def import_luna_original(self):
+        source = filedialog.askopenfilename(
+            parent=self.root, title="选择原作者未修改的 config..json",
+            filetypes=[("JSON 配置", "*.json"), ("所有文件", "*.*")])
+        if not source:
+            return
+        try:
+            selected = load_original_config(source)
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            self.status("不是包含自然语音和 Voice.License 的原作者配置，未修改现有设置。")
+            return
+        self.settings["luna_config"] = source
+        self.settings["voice"] = "luna:original"
+        self.speech.set_luna_config(source)
+        self.persist()
+        self.trace("已导入原作者配置：自然语音 type=1，"
+                   "原始许可字段将仅由本地独立工作进程读取")
+        self.status(f"已载入原始配置，选中{selected.safe_label}。"
+                    "请在语音列表完成扫描后按试听验证。")
+        self.scan_voices()
+
     def scan_voices(self):
         self.voice_select.configure(state="disabled")
         self.voice_var.set("正在扫描系统与广荣语音...")
@@ -371,7 +416,17 @@ class ReaderApp:
                 gr_names, gr_error = list_guangrong_voices(chosen_dir)
                 gr_voices = [(f"grtts:{i}", f"广荣 · {name}")
                              for i, name in enumerate(gr_names)]
-                self.events.put(("voices", voices + gr_voices, packages, gr_error))
+                luna_voices = []
+                luna_state = {}
+                source = self.settings.get("luna_config", "")
+                if source:
+                    luna_state = safe_diagnostic(source)
+                    if luna_state.get("config_valid"):
+                        luna_voices.append(("luna:original", "微软自然语音 · " +
+                                            luna_state["selected_voice"] +
+                                            "（原作者 JSON 配置）"))
+                self.events.put(("voices", voices + luna_voices + gr_voices,
+                                 packages, gr_error, luna_state))
             except Exception as exc:
                 self.events.put(("tts_error", str(exc)))
         threading.Thread(target=work, daemon=True, name="VoiceDiscovery").start()
@@ -513,14 +568,15 @@ class ReaderApp:
                     self.status("识别失败。点击“复制失败诊断”查看错误。")
                     self.update_output("识别失败。")
                 elif kind == "voices":
-                    _, voices, packages, gr_error = event
+                    _, voices, packages, gr_error, luna_state = event
                     self.voices = voices
                     self.voice_report = (voice_diagnostic(
                         [(id_, label) for id_, label in voices
-                         if not id_.startswith("grtts:")], packages)
+                         if not id_.startswith(("grtts:", "luna:"))], packages)
                         + "\n广荣语音数量：" + str(sum(
                             1 for id_, _ in voices if id_.startswith("grtts:")))
-                        + "\n广荣状态：" + (gr_error or "已完成 DLL 语音枚举"))
+                        + "\n广荣状态：" + (gr_error or "已完成 DLL 语音枚举")
+                        + "\nLuna 原始配置：" + str(luna_state))
                     names = [name for _, name in voices]
                     self.voice_select.configure(values=names,
                           state="readonly" if names else "disabled")
@@ -531,7 +587,10 @@ class ReaderApp:
                         available = any(n.lower() in label.lower()
                                         for _, label in voices
                                         for n in ("Yunxi", "Xiaoxiao"))
-                        if any(id_.startswith("grtts:") for id_, _ in voices):
+                        if any(id_ == "luna:original" for id_, _ in voices):
+                            self.voice_note.set("已按原作者 JSON 选中 Windows 自然语音；"
+                                                "SDK 是否允许合成要由真实语音输出验证。")
+                        elif any(id_.startswith("grtts:") for id_, _ in voices):
                             self.voice_note.set("已识别出广荣语音；可在上方选择并试听。"
                                                 "真实播放要在你的电脑上验证。")
                         elif gr_error and chosen_dll_path(self.settings.get("guangrong_dir","")):
