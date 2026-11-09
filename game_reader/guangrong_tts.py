@@ -12,6 +12,7 @@ reported accurately instead of claiming the voice works.
 from __future__ import annotations
 
 import base64
+import ctypes
 import os
 from pathlib import Path
 import subprocess
@@ -61,14 +62,27 @@ def _popen_host(dll_path: str):
     helper = guangrong_host_path()
     if not helper.is_file():
         raise FileNotFoundError("新版独立语音辅助程序 GuangrongHost.exe 缺失")
-    return subprocess.Popen(
-        [str(helper), "--server", str(file)],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        creationflags=CREATE_NO_WINDOW if sys.platform == "win32" else 0,
-        bufsize=0,
-    )
+    # PyInstaller's bootloader changes the per-process Windows DLL search
+    # directory to _internal. That setting is inherited by spawned processes,
+    # causing the independent native helper to hang while loading its CRT.
+    # Restore normal search for the few milliseconds of CreateProcess, then
+    # restore the frozen app's original setting for its own Python extensions.
+    kernel = ctypes.windll.kernel32 if sys.platform == "win32" else None
+    frozen_dir = getattr(sys, "_MEIPASS", None) if getattr(sys, "frozen", False) else None
+    if frozen_dir is not None and kernel is not None:
+        kernel.SetDllDirectoryW(None)
+    try:
+        return subprocess.Popen(
+            [str(helper), "--server", str(file)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            creationflags=CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            bufsize=0,
+        )
+    finally:
+        if frozen_dir is not None and kernel is not None:
+            kernel.SetDllDirectoryW(str(frozen_dir))
 
 
 def _error_message(code: str, detail: str = "") -> str:
