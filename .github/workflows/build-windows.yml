@@ -157,17 +157,17 @@ jobs:
         run: |
           $env:PYTHONPATH = (Get-Location).Path
           @'
-import json, subprocess
-from pathlib import Path
-exe = str(Path("dist/GameTextReader/GameTextReader.exe").resolve())
-request = {"command":"speak", "voice_id":"natural:MicrosoftWindows.Voice.zh-CN.Yunxi.1", "text":"你好", "config_path":""}
-result = subprocess.run([exe, "--luna-worker"], input=json.dumps(request)+"\n", capture_output=True, text=True, timeout=25)
-reply = json.loads(result.stdout.strip())
-assert reply["ok"] is False
-assert reply["stage"] in ("discovery_or_setup","synthesis","native_engine","unexpected","ipc_or_synthesis")
-assert "code" in reply
-print("PASS frozen worker protocol and classified error:", reply["stage"],reply["code"])
-'@ | python -
+          import json, subprocess
+          from pathlib import Path
+          exe = str(Path("dist/GameTextReader/GameTextReader.exe").resolve())
+          request = {"command":"speak", "voice_id":"natural:MicrosoftWindows.Voice.zh-CN.Yunxi.1", "text":"你好", "config_path":""}
+          result = subprocess.run([exe, "--luna-worker"], input=json.dumps(request)+"\n", capture_output=True, text=True, timeout=25)
+          reply = json.loads(result.stdout.strip())
+          assert reply["ok"] is False
+          assert reply["stage"] in ("discovery_or_setup","synthesis","native_engine","unexpected","ipc_or_synthesis")
+          assert "code" in reply
+          print("PASS frozen worker protocol and classified error:", reply["stage"],reply["code"])
+          '@ | python -
           if ($LASTEXITCODE -ne 0) { throw 'Frozen natural voice worker failed' }
           if (Test-Path 'dist/GameTextReader/config..json') {
             throw 'Never bundle a user's private voice configuration'
