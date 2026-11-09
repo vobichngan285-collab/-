@@ -171,13 +171,6 @@ def test_v18_small_is_the_only_ocr_tier():
     assert TIERS == {"small": ("PP-OCRv6_det_small.onnx", "PP-OCRv6_rec_small.onnx")}
     assert DET_LONG_SIDE == {"small": 1280}
 
-
-    from game_reader.ocr_backend import TIERS, DET_LONG_SIDE
-    assert TIERS["small"] == ("PP-OCRv6_det_small.onnx", "PP-OCRv6_rec_small.onnx")
-    assert TIERS["medium"] == ("PP-OCRv6_det_small.onnx", "PP-OCRv6_rec_medium.onnx")
-    assert DET_LONG_SIDE["medium"] <= DET_LONG_SIDE["small"]
-
-
 def test_grtts_requires_explicit_existing_vendor_dll(tmp_path):
     from game_reader.guangrong_tts import chosen_dll_path, list_guangrong_voices
     assert chosen_dll_path("") is None
@@ -274,7 +267,7 @@ def test_guangrong_host_is_a_dedicated_windows_exe():
 
 
 def test_v18_small_uses_original_rapidocr_defaults(monkeypatch, tmp_path):
-    """Neither Medium model files nor experimental batch/thread flags remain."""
+    """No Medium weights or custom batch/thread flags in the shipped OCR."""
     import sys
     from types import SimpleNamespace
     from game_reader import ocr_backend as mod
@@ -300,39 +293,6 @@ def test_v18_small_uses_original_rapidocr_defaults(monkeypatch, tmp_path):
     assert "Rec.rec_batch_num" not in params
     assert "EngineConfig.onnxruntime.intra_op_num_threads" not in params
     assert "medium" not in str(params).lower()
-
-
-    """Medium batch tuning must not change the proven Small recognizer."""
-    import sys
-    from types import SimpleNamespace
-    from game_reader import ocr_backend as mod
-    for name in {n for filenames in mod.TIERS.values() for n in filenames}:
-        (tmp_path / name).write_bytes(b"x" * 100_001)
-    monkeypatch.setattr(mod, "model_root", lambda: tmp_path)
-
-    snapshots = []
-
-    class FakeRapid:
-        def __init__(self, params):
-            snapshots.append(dict(params))
-
-    monkeypatch.setitem(sys.modules, "rapidocr", SimpleNamespace(
-        RapidOCR=FakeRapid,
-        ModelType=SimpleNamespace(SMALL="small", MEDIUM="medium"),
-        EngineType=SimpleNamespace(ONNXRUNTIME="onnxruntime"),
-        OCRVersion=SimpleNamespace(PPOCRV6="PP-OCRv6")))
-
-    worker = mod.LocalOCR(medium_rec_batch_num=2, medium_ort_threads=4)
-    worker._load("small")
-    worker._load("medium")
-    assert "Rec.rec_batch_num" not in snapshots[0]
-    assert "EngineConfig.onnxruntime.intra_op_num_threads" not in snapshots[0]
-    assert snapshots[0]["Rec.model_type"] == "small"
-    assert snapshots[1]["Rec.model_type"] == "medium"
-    assert snapshots[1]["Rec.rec_batch_num"] == 2
-    assert snapshots[1]["EngineConfig.onnxruntime.intra_op_num_threads"] == 4
-    assert snapshots[0]["Det.model_path"] == snapshots[1]["Det.model_path"]
-
 
 def test_abandoned_prewarm_never_overwrites_capture_model(monkeypatch):
     from game_reader.ocr_backend import LocalOCR
@@ -369,27 +329,6 @@ def test_small_ocr_metrics_expose_lock_and_load(monkeypatch):
     assert metrics["raw_lines"] == 0
     assert metrics["accepted_lines"] == 0
 
-
-    from types import SimpleNamespace
-    from PIL import Image
-    from game_reader.ocr_backend import LocalOCR
-    worker = LocalOCR(medium_rec_batch_num=2)
-    class Fake:
-        def __call__(self, image, **kwargs):
-            return SimpleNamespace(boxes=None, txts=None, scores=None, elapse_list=[1, 2, 3])
-    def load(tier):
-        worker.loaded_tier = tier
-        worker.engine = Fake()
-    monkeypatch.setattr(worker, "_load", load)
-    lines, metrics = worker.recognize_timed(Image.new("RGB", (64, 64)), (0, 0), "medium")
-    assert not lines
-    assert metrics["rec_batch_num"] == 2
-    assert metrics["model_lock_wait_ms"] >= 0
-    assert metrics["model_load_ms"] >= 0
-    assert metrics["model_ms"] >= metrics["model_lock_wait_ms"]
-    assert metrics["raw_lines"] == 0
-    assert metrics["accepted_lines"] == 0
-
 def test_removed_medium_tier_rejected():
     import pytest
     from game_reader.ocr_backend import LocalOCR
@@ -408,9 +347,3 @@ def test_existing_medium_setting_is_migrated_to_small(monkeypatch, tmp_path):
     monkeypatch.setattr(app, "CONFIG_PATH", path)
     assert app.read_settings()["tier"] == "small"
 
-
-    from game_reader.ocr_backend import LocalOCR
-    worker = LocalOCR()
-    assert worker.medium_rec_batch_num == 2
-    assert worker.medium_ort_threads == 2
-    # Small remains unchanged: tests above assert no batch/thread overrides.
