@@ -257,17 +257,13 @@ def test_independent_guangrong_setup_rejects_unverified_binary(tmp_path, monkeyp
     assert not (tmp_path / "untrusted").exists()
 
 
-def test_win_native_guangrong_loader_rejects_unusable_x64_binary(tmp_path):
-    """Never report success or PyInstaller's misleading missing-file message."""
-    import sys
-    if sys.platform != "win32":
-        return
-    from game_reader.guangrong_tts import load_guangrong_native
-    file = tmp_path / "grtts_x64.dll"
-    file.write_bytes(b"not a PE DLL")
-    try:
-        load_guangrong_native(file)
-    except RuntimeError as exc:
-        assert "WinError 193" in str(exc), str(exc)
-    else:
-        raise AssertionError("Invalid vendor DLL must be rejected by native loader")
+def test_guangrong_host_is_a_dedicated_windows_exe():
+    from game_reader.guangrong_tts import guangrong_host_path, _error_message
+    assert guangrong_host_path().name == "GuangrongHost.exe"
+    assert "1114" in _error_message("1114")
+    assert "193" in _error_message("193")
+    # The engine must not be loaded by the PyInstaller-frozen Python runtime.
+    import inspect
+    from game_reader.guangrong_tts import list_guangrong_voices
+    assert "subprocess" in inspect.getsource(list_guangrong_voices)
+
