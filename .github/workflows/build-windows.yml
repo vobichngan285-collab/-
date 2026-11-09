@@ -5,6 +5,8 @@ on:
     branches: ['game-text-reader-*']
     paths:
       - 'game_reader/**'
+      - 'native/**'
+      - 'tools/**'
       - 'main.py'
       - 'prepare_models.py'
       - 'requirements-win.txt'
