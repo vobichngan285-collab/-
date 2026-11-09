@@ -141,154 +141,312 @@ class ReaderApp:
         self.root.after(40, self.poll_messages)
 
     def create_widgets(self):
-        p = ttk.Frame(self.root, padding=12)
-        p.pack(fill="both", expand=True)
-        ttk.Label(p, text="游戏文字助手 · V1.2 Small + 双鼠标朗读模式",
-                  font=("Microsoft YaHei UI", 16, "bold")).pack(anchor="w")
-        ttk.Label(p, text="F8 全屏 OCR，F9 切换鼠标指向／悬停识别，F10 手动局部 OCR。"
-                  "F11 全局暗屏框选；四个快捷键均可自定义单键或鼠标侧键。",
-                  wraplength=690).pack(anchor="w", pady=(2, 8))
-        keys = ttk.LabelFrame(p, text="截图热键", padding=8)
-        keys.pack(fill="x", pady=3)
-        self.key_button = ttk.Button(keys, text=self.settings["hotkey_label"],
-                                     command=self.capture_hotkey)
-        self.key_button.pack(side="left")
-        ttk.Label(keys, text="键盘单键／鼠标侧键 1、2；Esc 取消。").pack(
-            side="left", padx=10)
+        """Large-print, native-widget settings UI.
 
-        modes = ttk.LabelFrame(p, text="鼠标朗读与局部 OCR", padding=8)
-        modes.pack(fill="x", pady=3)
-        mode_row = ttk.Frame(modes)
-        mode_row.pack(fill="x")
-        ttk.Label(mode_row, text="模式切换键").pack(side="left")
-        self.mode_key_button = ttk.Button(
-            mode_row, text=self.settings["mode_hotkey_label"], width=18,
-            command=lambda: self.begin_hotkey("mode_vk"))
-        self.mode_key_button.pack(side="left", padx=(5, 18))
-        ttk.Label(mode_row, text="局部 OCR 手动键").pack(side="left")
-        self.local_key_button = ttk.Button(
-            mode_row, text=self.settings["local_hotkey_label"], width=18,
-            command=lambda: self.begin_hotkey("local_vk"))
-        self.local_key_button.pack(side="left", padx=5)
-        pick_row = ttk.Frame(modes)
-        pick_row.pack(fill="x", pady=(4, 0))
-        ttk.Label(pick_row, text="随时框选快捷键").pack(side="left")
-        self.pick_key_button = ttk.Button(
-            pick_row, text=self.settings["pick_hotkey_label"], width=18,
-            command=lambda: self.begin_hotkey("pick_vk"))
-        self.pick_key_button.pack(side="left", padx=6)
-        ttk.Label(pick_row, text="任何页面按一下即可暗屏框选；Esc 取消").pack(
-            side="left", padx=6)
+        No graphic-only interaction surfaces: every navigation item, checkbox,
+        shortcut control and text field is a real focusable ttk widget with
+        a distinct Windows accessibility name.
+        """
+        from .ui_theme import configure_theme, BG, SIDEBAR, TEXT, MUTED
+        self.ui_style = configure_theme(self.root)
+
+        top = ttk.Frame(self.root, padding=(22, 14))
+        top.pack(fill="x")
+        ttk.Label(top, text="Blue Star OCR", style="Heading.TLabel").pack(side="left")
+        ttk.Label(top, text="  游戏文字朗读助手", style="Subheading.TLabel").pack(
+            side="left", padx=(5, 0))
+
+        body = ttk.Frame(self.root, padding=(10, 0, 12, 0))
+        body.pack(fill="both", expand=True)
+        sidebar = ttk.Frame(body, style="Sidebar.TFrame", width=230, padding=(12, 12))
+        sidebar.pack(side="left", fill="y", padx=(0, 12))
+        sidebar.pack_propagate(False)
+        ttk.Label(sidebar, text="设置中心", style="Sidebar.TLabel").pack(
+            anchor="w", pady=(5, 22))
+
+        main = ttk.Frame(body)
+        main.pack(side="left", fill="both", expand=True)
+        self.page_title = tk.StringVar(value="OCR 与鼠标")
+        ttk.Label(main, textvariable=self.page_title,
+                  style="Heading.TLabel").pack(anchor="w", pady=(10, 14))
+        self.page_host = ttk.Frame(main)
+        self.page_host.pack(fill="both", expand=True)
+        self.page_host.grid_columnconfigure(0, weight=1)
+        self.page_host.grid_rowconfigure(0, weight=1)
+        self._pages = {}
+        self.nav_buttons = {}
+        nav = (
+            ("mouse", "OCR 与鼠标"),
+            ("voice", "语音设置"),
+            ("fullscreen", "全屏 OCR"),
+            ("filters", "内容过滤"),
+            ("general", "通用设置"),
+            ("about", "关于软件"),
+        )
+        for key, title in nav:
+            self.nav_buttons[key] = ttk.Button(
+                sidebar, text=title, style="Nav.TButton",
+                command=lambda which=key: self.show_page(which))
+            self.nav_buttons[key].pack(fill="x", pady=(0, 10))
+            page = ttk.Frame(self.page_host, padding=(4, 0, 4, 4))
+            page.grid(row=0, column=0, sticky="nsew")
+            self._pages[key] = page
+
+        def section(page, title):
+            group = ttk.LabelFrame(page, text="  " + title + "  ", padding=(16, 12))
+            group.pack(fill="x", pady=(0, 12))
+            return group
+
+        def row(group, space=8):
+            container = ttk.Frame(group, style="Card.TFrame")
+            container.pack(fill="x", pady=space)
+            return container
+
+        def card_label(group, title):
+            return ttk.Label(group, text=title, style="Card.TLabel")
+
+        def note(group, text):
+            ttk.Label(group, text=text, style="CardMuted.TLabel",
+                      wraplength=630).pack(anchor="w", pady=(4, 3))
+
+        mouse = self._pages["mouse"]
+        modes = section(mouse, "工作模式")
         self.mouse_mode_var = tk.StringVar(
-            value=f'当前：默认鼠标指向朗读（按 {self.settings["mode_hotkey_label"]} 进入悬停 OCR）')
-        ttk.Label(modes, textvariable=self.mouse_mode_var,
-                  foreground="#245ca5").pack(anchor="w", pady=(4, 2))
-        options_row = ttk.Frame(modes)
-        options_row.pack(fill="x", pady=(3, 0))
-        ttk.Label(options_row, text="周期刷新（毫秒）").pack(side="left")
-        self.period_var = tk.StringVar(value=str(self.settings["period_ms"]))
-        self.period_entry = ttk.Entry(options_row, textvariable=self.period_var, width=9)
-        self.period_entry.pack(side="left", padx=(6, 4))
-        self.period_save_button = ttk.Button(
-            options_row, text="保存间隔", command=self.save_period)
-        self.period_save_button.pack(side="left", padx=(0, 12))
+            value="当前：默认模式（按 F9 切换到鼠标模式）")
+        card_label(modes, "鼠标模式：局部 OCR 跟随鼠标，默认模式：全屏文字指向朗读").pack(
+            anchor="w", pady=(0, 6))
+        ttk.Label(modes, textvariable=self.mouse_mode_var, style="CardMuted.TLabel").pack(
+            anchor="w", pady=(0, 4))
+        hotkeys = row(modes)
+        card_label(hotkeys, "切换按键").pack(side="left")
+        self.mode_key_button = ttk.Button(
+            hotkeys, text=self.settings["mode_hotkey_label"], width=17,
+            command=lambda: self.begin_hotkey("mode_vk"))
+        self.mode_key_button.pack(side="left", padx=(12, 15))
+        card_label(hotkeys, "手动局部 OCR").pack(side="left")
+        self.local_key_button = ttk.Button(
+            hotkeys, text=self.settings["local_hotkey_label"], width=15,
+            command=lambda: self.begin_hotkey("local_vk"))
+        self.local_key_button.pack(side="left", padx=(10, 0))
+        self.mode_voice_var = tk.BooleanVar(value=self.settings["mode_voice_hint"])
+        self.mode_voice_check = ttk.Checkbutton(
+            modes, text="切换时语音提示：鼠标模式／默认模式",
+            variable=self.mode_voice_var, command=self.save_visual_settings)
+        self.mode_voice_check.pack(anchor="w")
+
+        selection = section(mouse, "绿色扫描框")
+        pick_row = row(selection)
+        card_label(pick_row, "重新框选").pack(side="left")
+        self.pick_key_button = ttk.Button(
+            pick_row, text=self.settings["pick_hotkey_label"], width=17,
+            command=lambda: self.begin_hotkey("pick_vk"))
+        self.pick_key_button.pack(side="left", padx=(12, 12))
         self.pick_region_button = ttk.Button(
-            options_row, text="暗屏十字框选区域", command=self.select_region)
+            pick_row, text="暗屏框选宽高", command=self.select_region)
         self.pick_region_button.pack(side="left")
+        self.show_frame_var = tk.BooleanVar(value=self.settings["show_scan_frame"])
+        self.show_frame_check = ttk.Checkbutton(
+            selection, text="显示跟随鼠标的淡绿色边框（不会挡住鼠标点击）",
+            variable=self.show_frame_var, command=self.save_visual_settings)
+        self.show_frame_check.pack(anchor="w")
         self.region_info_var = tk.StringVar(
             value=self.format_region(RelativeRegion.from_settings(self.settings["region"])))
-        ttk.Label(modes, textvariable=self.region_info_var,
-                  wraplength=680).pack(anchor="w", pady=(4, 0))
-        ttk.Label(modes, text="以鼠标为中心扫描，只读最近的文字；附近没有文字就保持安静。"
-                  "鼠标离开后停止旧朗读；F11 框选只决定扫描宽高。").pack(anchor="w")
+        ttk.Label(selection, textvariable=self.region_info_var,
+                  style="CardMuted.TLabel").pack(anchor="w", pady=(4, 0))
 
-        models = ttk.LabelFrame(p, text="离线 OCR 模型", padding=8)
-        models.pack(fill="x", pady=3)
-        ttk.Label(models, text="PP-OCRv6 Small · V1.2 原始检测设置（唯一模型）").pack(anchor="w")
+        timing = section(mouse, "执行与去重")
+        timing_row = row(timing)
+        card_label(timing_row, "OCR 周期（毫秒）").pack(side="left")
+        self.period_var = tk.StringVar(value=str(self.settings["period_ms"]))
+        self.period_entry = ttk.Entry(timing_row, textvariable=self.period_var, width=9)
+        self.period_entry.pack(side="left", padx=(12, 10))
+        self.period_save_button = ttk.Button(
+            timing_row, text="保存", command=self.save_period)
+        self.period_save_button.pack(side="left")
+        repeat_row = row(timing, 4)
+        self.similarity_enabled_var = tk.BooleanVar(
+            value=self.settings["similarity_enabled"])
+        self.similarity_check = ttk.Checkbutton(
+            repeat_row, text="过滤相似的重复文字",
+            variable=self.similarity_enabled_var, command=self.save_visual_settings)
+        self.similarity_check.pack(side="left")
+        card_label(repeat_row, "文本阈值").pack(side="left", padx=(26, 10))
+        self.similarity_var = tk.StringVar(
+            value=str(self.settings["similarity_threshold"]))
+        self.similarity_spin = ttk.Spinbox(
+            repeat_row, from_=0, to=8, width=5, increment=1,
+            textvariable=self.similarity_var)
+        self.similarity_spin.pack(side="left")
+        self.similarity_spin.bind("<FocusOut>", self.save_similarity)
+        self.similarity_spin.bind("<Return>", self.save_similarity)
+        note(timing, "短物品名只过滤完全相同的文字；长段落可容忍少量识别抖动。")
 
-        voice_frame = ttk.LabelFrame(p, text="本地语音（系统已安装自然音色 / SAPI / WinRT）", padding=8)
-        voice_frame.pack(fill="x", pady=3)
+        voice = self._pages["voice"]
+        voice_frame = section(voice, "本地系统语音")
+        card_label(voice_frame, "当前音色").pack(anchor="w")
         self.voice_var = tk.StringVar(value="正在扫描本地语音...")
-        self.voice_select = ttk.Combobox(voice_frame, textvariable=self.voice_var,
-                                         width=56, state="readonly")
-        self.voice_select.pack(fill="x")
+        self.voice_select = ttk.Combobox(
+            voice_frame, textvariable=self.voice_var, width=55, state="readonly")
+        self.voice_select.pack(fill="x", pady=(8, 12))
         self.voice_select.bind("<<ComboboxSelected>>", self.change_voice)
-
-        vr = ttk.Frame(voice_frame)
-        vr.pack(fill="x", pady=(5, 0))
-        self.rescan_button = ttk.Button(vr, text="重新扫描语音",
-                                        command=self.scan_voices)
+        vr = row(voice_frame, 2)
+        self.rescan_button = ttk.Button(
+            vr, text="重新扫描语音", command=self.scan_voices)
         self.rescan_button.pack(side="left")
-        self.preview_button = ttk.Button(vr, text="试听",
-                                         command=self.test_voice)
-        self.preview_button.pack(side="left", padx=5)
-        self.stop_button = ttk.Button(vr, text="停止朗读",
-                                      command=self.speech.stop)
-        self.stop_button.pack(side="left")
-        self.voice_diag_button = ttk.Button(vr, text="复制语音诊断",
-                                            command=self.copy_voice_report)
-        self.voice_diag_button.pack(side="left", padx=5)
-
-        self.voice_note = tk.StringVar(value="扫描到自然语音包仅代表已安装；试听成功后才算真正可朗读。")
-        self.voice_note_label = ttk.Label(voice_frame, textvariable=self.voice_note,
-                                          wraplength=560)
-        self.voice_note_label.pack(anchor="w", pady=(5, 0))
-        import_row = ttk.Frame(voice_frame)
-        import_row.pack(fill="x", pady=4)
+        self.preview_button = ttk.Button(vr, text="试听", command=self.test_voice)
+        self.preview_button.pack(side="left", padx=(10, 0))
+        self.stop_button = ttk.Button(vr, text="停止朗读", command=self.speech.stop)
+        self.stop_button.pack(side="left", padx=(10, 0))
+        self.voice_note = tk.StringVar(value="自然语音已安装不代表能合成；请在本机试听。")
+        self.voice_note_label = ttk.Label(
+            voice_frame, textvariable=self.voice_note,
+            style="CardMuted.TLabel", wraplength=640)
+        self.voice_note_label.pack(anchor="w", pady=(6, 4))
         self.import_luna_button = ttk.Button(
-            import_row, text="选择本机原版语音配置", command=self.import_luna_config)
-        self.import_luna_button.pack(side="left")
-        ttk.Label(import_row, text="原始 config..json 留在本机；不写入 GitHub。").pack(
-            side="left", padx=6)
+            voice_frame, text="选择本机原版语音配置", command=self.import_luna_config)
+        self.import_luna_button.pack(anchor="w", pady=7)
+        note(voice_frame, "原始 config.json 只在你的电脑上使用，不会上传。")
 
-        rate_row = ttk.Frame(voice_frame)
-        rate_row.pack(fill="x", pady=3)
-        ttk.Label(rate_row, text="语速").pack(side="left")
+        voice_controls = section(voice, "语速与音量")
+        rate_row = row(voice_controls)
+        card_label(rate_row, "语速").pack(side="left")
         self.rate_var = tk.IntVar(value=int(self.settings["rate"]))
-        self.rate_slider = ttk.Scale(rate_row, from_=-8, to=8, variable=self.rate_var,
-                                      command=self.change_rate)
-        self.rate_slider.pack(side="left", fill="x", expand=True, padx=8)
-        self.rate_label = ttk.Label(rate_row, text=str(self.rate_var.get()), width=4)
+        self.rate_slider = ttk.Scale(
+            rate_row, from_=-8, to=8, variable=self.rate_var, command=self.change_rate)
+        self.rate_slider.pack(side="left", fill="x", expand=True, padx=12)
+        self.rate_label = ttk.Label(
+            rate_row, text=str(self.rate_var.get()), width=4, style="Card.TLabel")
         self.rate_label.pack(side="left")
-
-        volume_row = ttk.Frame(voice_frame)
-        volume_row.pack(fill="x", pady=3)
-        ttk.Label(volume_row, text="音量").pack(side="left")
+        volume_row = row(voice_controls)
+        card_label(volume_row, "音量").pack(side="left")
         self.volume_var = tk.IntVar(value=int(self.settings["volume"]))
-        self.volume_slider = ttk.Scale(volume_row, from_=0, to=100,
-                                        variable=self.volume_var, command=self.change_volume)
-        self.volume_slider.pack(side="left", fill="x", expand=True, padx=8)
-        self.volume_label = ttk.Label(volume_row,
-                                      text=f'{self.settings["volume"]}%', width=5)
+        self.volume_slider = ttk.Scale(
+            volume_row, from_=0, to=100, variable=self.volume_var,
+            command=self.change_volume)
+        self.volume_slider.pack(side="left", fill="x", expand=True, padx=12)
+        self.volume_label = ttk.Label(
+            volume_row, text=f'{self.settings["volume"]}%', width=5,
+            style="Card.TLabel")
         self.volume_label.pack(side="left")
+        diag_row = row(voice_controls)
+        self.voice_diag_button = ttk.Button(
+            diag_row, text="复制语音诊断", command=self.copy_voice_report)
+        self.voice_diag_button.pack(side="left")
 
-        controls = ttk.Frame(p)
-        controls.pack(fill="x", pady=(9, 4))
-        self.read_btn = ttk.Button(controls, text="立即截屏识别",
-                                   command=self.capture_from_button)
-        self.read_btn.pack(side="left")
-        ttk.Button(controls, text="复制失败诊断",
-                   command=self.copy_error).pack(side="left", padx=5)
-        ttk.Button(controls, text="最小化到任务栏",
+        fullscreen = self._pages["fullscreen"]
+        full_frame = section(fullscreen, "原版 V1.2 Small OCR")
+        note(full_frame, "保留原版全屏截图识别与文字框指向朗读；没有增加第二种模型。")
+        full_hotkey = row(full_frame)
+        card_label(full_hotkey, "全屏 OCR 快捷键").pack(side="left")
+        self.key_button = ttk.Button(
+            full_hotkey, text=self.settings["hotkey_label"], width=16,
+            command=self.capture_hotkey)
+        self.key_button.pack(side="left", padx=(18, 0))
+        self.read_btn = ttk.Button(
+            full_frame, text="立即截屏识别", style="Accent.TButton",
+            command=self.capture_from_button)
+        self.read_btn.pack(anchor="w", pady=(16, 8))
+        note(full_frame, "鼠标默认模式使用 F8 截图中识别的文字坐标；结果保留 60 秒。")
+
+        filtering = self._pages["filters"]
+        filter_frame = section(filtering, "朗读内容过滤")
+        note(filter_frame, "先 OCR，再按选项过滤，最后去重并朗读；原始 OCR 结果不会删除。")
+        self.filter_english_var = tk.BooleanVar(value=self.settings["filter_english"])
+        self.filter_numbers_var = tk.BooleanVar(value=self.settings["filter_numbers"])
+        self.filter_symbols_var = tk.BooleanVar(value=self.settings["filter_symbols"])
+        self.filter_english_check = ttk.Checkbutton(
+            filter_frame, text="过滤英文（例如 DLSS、Press）",
+            variable=self.filter_english_var, command=self.save_visual_settings)
+        self.filter_english_check.pack(anchor="w", pady=8)
+        self.filter_numbers_check = ttk.Checkbutton(
+            filter_frame, text="过滤数字（例如 18、173）",
+            variable=self.filter_numbers_var, command=self.save_visual_settings)
+        self.filter_numbers_check.pack(anchor="w", pady=8)
+        self.filter_symbols_check = ttk.Checkbutton(
+            filter_frame, text="过滤符号（例如 +、% 、★）",
+            variable=self.filter_symbols_var, command=self.save_visual_settings)
+        self.filter_symbols_check.pack(anchor="w", pady=8)
+        note(filter_frame, "关闭某项过滤后即可恢复对应文字的朗读；游戏关键数值可按需开启。")
+
+        general = self._pages["general"]
+        tools = section(general, "常用工具")
+        tools_row = row(tools)
+        ttk.Button(tools_row, text="最小化到任务栏",
                    command=self.root.iconify).pack(side="left")
-        ttk.Button(controls, text="清除所有结果",
+        ttk.Button(tools_row, text="清除全部结果",
                    command=lambda: self.invalidate("已清除全部识别结果。")).pack(
-                       side="left", padx=5)
+                       side="left", padx=12)
+        ttk.Button(tools_row, text="复制失败诊断",
+                   command=self.copy_error).pack(side="left")
+        note(tools, "四个快捷键都可设置键盘单键或鼠标侧键 1/2，自动防止重复占用。")
+        note(tools, "不会存储游戏截图、OCR 文字或微软自然语音许可内容。")
 
-        self.status_var = tk.StringVar(value="就绪。截图完成发短提示音；"
-                                       "鼠标进入文字立即读，不需要等待。")
-        self.status_label = ttk.Label(p, textvariable=self.status_var, wraplength=570)
-        self.status_label.pack(anchor="w", pady=4)
-        viewer = ttk.LabelFrame(p, text="本次识别的文字（无坐标，保留至过期）", padding=6)
-        viewer.pack(fill="both", expand=True)
-        self.output = tk.Text(viewer, wrap="word", height=8, state="disabled",
-                              font=("Microsoft YaHei UI", 10))
-        scroll = ttk.Scrollbar(viewer, orient="vertical", command=self.output.yview)
-        self.output.configure(yscrollcommand=scroll.set)
-        self.output.pack(side="left", fill="both", expand=True)
-        scroll.pack(side="right", fill="y")
-        ttk.Label(p, text="已关闭旧的画面变化检测；保留 V1.2 原始截图与 Small OCR 参数。",
-                  wraplength=570).pack(anchor="w", pady=(6, 0))
+        about = self._pages["about"]
+        details = section(about, "Blue Star OCR")
+        note(details, "Windows 11 · V1.2 Small OCR 引擎 · 游戏文字朗读实验版")
+        note(details, "使用系统安装的中文语音；自然语音调用本机原作者兼容组件。")
+        note(details, "界面采用原生 ttk 控件，为 Windows 无障碍读屏及键盘操作保留控件语义。")
+
+        footer = ttk.Frame(self.root, padding=(22, 10, 22, 14))
+        footer.pack(side="bottom", fill="x")
+        self.status_var = tk.StringVar(value="就绪。F9 切换工作模式，F11 可调整扫描宽高。")
+        self.status_label = ttk.Label(
+            footer, textvariable=self.status_var, style="Muted.TLabel",
+            wraplength=1000)
+        self.status_label.pack(anchor="w", pady=(0, 6))
+        self.output = tk.Text(
+            footer, wrap="word", height=3, state="disabled",
+            font=("Microsoft YaHei UI", 13),
+            background="#102C4B", foreground="#F2F7FF",
+            selectbackground="#0E8AE8", relief="flat",
+            padx=10, pady=8)
+        self.output.pack(fill="x")
+        self.show_page("mouse")
+
+    def show_page(self, which: str):
+        if which not in self._pages:
+            raise ValueError("未知设置页")
+        titles = {
+            "mouse": "OCR 与鼠标",
+            "voice": "语音设置",
+            "fullscreen": "全屏 OCR",
+            "filters": "内容过滤",
+            "general": "通用设置",
+            "about": "关于软件",
+        }
+        for key, page in self._pages.items():
+            if key == which:
+                page.tkraise()
+            self.nav_buttons[key].configure(
+                style="Selected.Nav.TButton" if key == which else "Nav.TButton")
+        self.page_title.set(titles[which])
+        self.current_page = which
+
+    def save_visual_settings(self):
+        for name, variable in (
+            ("show_scan_frame", self.show_frame_var),
+            ("mode_voice_hint", self.mode_voice_var),
+            ("similarity_enabled", self.similarity_enabled_var),
+            ("filter_english", self.filter_english_var),
+            ("filter_numbers", self.filter_numbers_var),
+            ("filter_symbols", self.filter_symbols_var),
+        ):
+            self.settings[name] = bool(variable.get())
+        if not self.settings["show_scan_frame"] and self.scan_frame is not None:
+            self.scan_frame.hide()
+        self.persist()
+
+    def save_similarity(self, _event=None):
+        from .text_filters import similarity_threshold
+        try:
+            value = similarity_threshold(self.similarity_var.get())
+        except ValueError as exc:
+            self.status(str(exc))
+            self.similarity_var.set(str(self.settings["similarity_threshold"]))
+            return
+        self.settings["similarity_threshold"] = value
+        self.persist()
+        self.status(f"文本相似度阈值已设置为 {value}。")
 
     def enable_accessibility(self):
         try:
