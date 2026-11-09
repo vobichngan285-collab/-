@@ -152,7 +152,8 @@ def test_hotkey_assignment_refuses_duplicates_and_records_side_button():
     app.settings = {"vk": 119, "hotkey_label": "F8",
                     "mode_vk": 120, "mode_hotkey_label": "F9",
                     "local_vk": 121, "local_hotkey_label": "F10",
-                    "pick_vk": 122, "pick_hotkey_label": "F11"}
+                    "pick_vk": 122, "pick_hotkey_label": "F11",
+                    "clear_vk": 117, "clear_hotkey_label": "F6"}
     app._binding_target = "mode_vk"
     app.mouse_mode = "hover"
     app._hotkey_previous = {}
@@ -185,9 +186,9 @@ def test_global_key_poll_handles_side_hotkeys_once_per_press(monkeypatch):
     app._choosing_region = False
     app.setting_hotkey = False
     app.settings = {"vk": 119, "mode_vk": 5, "local_vk": 6,
-                    "pick_vk": 122, "period_ms": 500}
+                    "pick_vk": 122, "clear_vk": 117, "period_ms": 500}
     app._hotkey_previous = {"vk": False, "mode_vk": False, "local_vk": False,
-                            "pick_vk": False}
+                            "pick_vk": False, "clear_vk": False}
     app.expires_at = None
     app.mouse_mode = "pointer"
     app.lines = []
@@ -293,9 +294,9 @@ def test_every_mode_key_press_switches_immediately_first_hover_second_pointer():
 
 def test_f11_global_picker_has_separate_hotkey_and_does_not_conflict():
     from game_reader.hover_modes import HOTKEY_FIELDS, HOTKEY_DEFAULTS, sanitize_hotkeys
-    assert HOTKEY_FIELDS == ("vk", "mode_vk", "local_vk", "pick_vk")
+    assert HOTKEY_FIELDS == ("vk", "mode_vk", "local_vk", "pick_vk", "clear_vk")
     d = sanitize_hotkeys({"vk": 119, "mode_vk": 120,
-                          "local_vk": 121, "pick_vk": 122})
+                          "local_vk": 121, "pick_vk": 122, "clear_vk": 117})
     assert [d[k] for k in HOTKEY_FIELDS] == list(HOTKEY_DEFAULTS)
 
 
@@ -399,7 +400,7 @@ def test_f11_opens_picker_globally_and_window_switch_clears_old_ocr(monkeypatch)
     app.setting_hotkey = False
     app.settings = {"vk": 119, "mode_vk": 120,
                     "local_vk": 121, "pick_vk": 122, "period_ms": 500}
-    app._hotkey_previous = {x: False for x in ("vk","mode_vk","local_vk","pick_vk")}
+    app._hotkey_previous = {x: False for x in ("vk","mode_vk","local_vk","pick_vk","clear_vk")}
     app.expires_at = None
     app.mouse_mode = "pointer"
     app.busy = False
