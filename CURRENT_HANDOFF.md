@@ -1,6 +1,16 @@
-# Windows 游戏文字助手｜当前交接（2026-11-09 · V1.8）
+# Windows 游戏文字助手｜当前交接（2026-11-09 · V2.0 原版 Luna）
 
 **当前仅重点开发 Windows 11 游戏 OCR + 鼠标指向文字朗读；安卓「蓝星向导」暂时搁置，旧安卓离线 OCR/CRAFT 已放弃。** 本仓库 https://github.com/vobichngan285-collab/- 。新对话先读本文件即可，历史在 `RELEASE_STATUS.md`，不必重复旧实验。
+
+## 最新：V2.0 原版 LunaTranslator 语音引擎和原始配置（2026-11-09）
+
+- **用户最终明确要求：** 不再写自己的自然语音 SDK 适配器；必须直接采用 B 站作者开源 LunaTranslator 原版引擎且不修改其代码，用户上传的 `config..json` 也**逐字节保持原样**。只允许重写 GameTextReader 与原引擎之间的接口。保留原 Small OCR、F8、鼠标指向朗读。尽量云端验证，用户不愿反复测试无效包。
+- **Windows 实际成果：** 实验分支 `exp/luna-verbatim-upstream-20261109` HEAD `aff85bb6f0877b125a074eb38321ce97c265c626`，Actions [42616893234](https://github.com/vobichngan285-collab/-/actions/runs/42616893234) **completed/success**，38项源码单元测试、冻结 EXE、Small OCR、语音 worker、原引擎哈希、GPT 工具链及无障碍等通过，30个步骤成功。
+- **原作者文件原封不动：** 官方 `HIllya51/LunaTranslator` 版本 `v12.1.3.9`，原发布 ZIP SHA256 `c0248288c12de19e9e1f953922355aaa123699820fce26e4e84329be2666d62f`；从其 `files/LunaSubprocess64.exe` 获取**原版 EXE 不重编译不打补丁**，398144字节，SHA256 `886892cd78cdd8bbd029a3f4977853cc1ddce1c9723e656986fa8b5a79e6a974`。源码对应官方 tag commit `84677faeaa1e61bd7dd00b820090e9d2fe6c5142`，源文件 `windowstts.py`、`LunaSubProcess.py`、`basettsclass.py`、`msnaturalvoice.cpp`、`pipehost.hpp`、GPLv3 LICENSE 均从官方同版本复制后逐文件哈希核验；完整官方源码 ZIP 随程序提供。
+- **唯一必要的新代码：** `game_reader/upstream_luna_pipe.py` 通过原生 Win32 named pipe、event 和 32MB shared map 调用作者**未修改**的 `LunaSubprocess64.exe msnaturalvoice <pipe> <event> <map> <path> <sdk dir> <exact Voice.License>`；`game_reader/luna_voice_worker.py` 不再调用自己写的 Embedded SDK（该实现已从 `luna_natural_voice.py` 删除），而是仅读取原 JSON、按原作者 SSML 公式发给原 exe，拿 WAV 回 GameTextReader 播放。GUI 在 EXE 同目录有 `config..json` 时优先选原版 Luna 音色，不会退回旧设置。无权限错误不冒称成功。
+- **交付公开与私有的区别：** 不包含用户配置的可公开 GitHub CI 文件：[GameTextReader V2.0 artifact 13672424251](https://github.com/vobichngan285-collab/-/actions/runs/42616893234/artifacts/13672424251)，内层 `GameTextReader_V2.0_OriginalUnmodifiedLuna_Windows_x64_Portable.zip`。**用户原始 `config..json` 没有公开上传到 GitHub**；此次在 ChatGPT 容器内将上传的原字节加入已成功构建的 ZIP 并独立校验。用户私人整合 ZIP `GameTextReader_V2.0_Original_Luna_Exact_Config_Windows_x64.zip`，130403883字节，SHA256 `e4cb1330738a79c3064b69fd1532d88da5d3005617c71b84a542a3f70c880cf6`，ZIP CRC通过，1200文件条目；原 Config 字节不变、上游执行文件哈希不变，仅有2个 Small ONNX，用户可以在本次会话沙盒下载，不要把此私人 ZIP 上传公共仓库。
+- **不可夸大：** GitHub Windows 2025 没有云希、晓晓模型，所以**目标自然语音尚未真实出声验收**；CI 证明原执行文件、IPC 命令和原始配置连接就绪，不证明微软模型适用授权或扬声器实际出声。上游 GPLv3 分发须保留完整源码，微软模型独立使用遵守其自身许可。不要重新用 SAPI、WinRT、广荣替代原引擎。
+- **旧 V1.8 和 V1.9 未覆盖。** V2.0 在独立实验分支；后续如用户报告错误，按作者原代码/调用接口排查，先证实 WindowsApps 包存在、运行时组件与本地进程状态，不得更改用户配置内容。
 
 ## 当前完成版本
 
