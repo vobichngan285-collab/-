@@ -16,41 +16,53 @@ import tkinter as tk
 from pathlib import Path
 from queue import Empty, Queue
 from tkinter import ttk, filedialog
+from PIL import ImageGrab
 
 from .core import HoverTracker, OCRLine, hit_test, build_reading_regions
 from .ocr_backend import LocalOCR
-from .win_screen import enable_dpi_awareness, get_cursor, is_key_down, grab_current_monitor
+from .win_screen import (enable_dpi_awareness, get_cursor, is_key_down,
+                         grab_current_monitor, monitor_rect_at_cursor)
 from .speech import SpeechWorker, enumerate_sapi_voices
 from .voice_info import preferred_voice_index, narrator_package_names, voice_diagnostic
 from .ms_voice_discovery import (discover_natural_voices, load_user_config,
                                  inspect_local_voice_config)
 from .cues import CuePlayer
+from .hover_modes import (MOUSE_SIDE_VKS, DEFAULT_REGION, RelativeRegion,
+                          HOTKEY_FIELDS, HOTKEY_LABELS, hotkey_label,
+                          valid_hotkey, sanitize_hotkeys, parse_period_ms,
+                          capture_box, normalized_text, next_mouse_mode)
+from .region_picker import ScreenRegionPicker
 
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "GameTextReader"
 CONFIG_PATH = CONFIG_DIR / "settings.json"
 ERROR_LOG = CONFIG_DIR / "last_ocr_error.txt"
-DEFAULTS = {"vk": 0x77, "hotkey_label": "F8", "tier": "small", "voice": "",
-            "rate": 0, "volume": 100, "dwell_ms": 0, "luna_config": ""}
-MODIFIER_KEYS = {16, 17, 18, 91, 92}
+DEFAULTS = {"vk": 0x77, "hotkey_label": "F8",
+            "mode_vk": 0x78, "mode_hotkey_label": "F9",
+            "local_vk": 0x79, "local_hotkey_label": "F10",
+            "period_ms": 500, "region": list(DEFAULT_REGION),
+            "tier": "small", "voice": "", "rate": 0,
+            "volume": 100, "dwell_ms": 0, "luna_config": ""}
 RESULT_TTL_SECONDS = 60.0
 
 
 def read_settings() -> dict:
+    """Migrate an existing V1.2/voice-fix settings file without losing voice."""
     try:
-        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            raise ValueError("Settings must be a dictionary")
-        settings = DEFAULTS | {k: data[k] for k in DEFAULTS if k in data}
-        settings["vk"] = int(settings["vk"])
-        if not 1 <= settings["vk"] <= 254 or settings["vk"] in MODIFIER_KEYS:
-            raise ValueError("Invalid hotkey")
-        # Deliberately retain only the user-verified V1.2 Small model.
-        settings["tier"] = "small"
-        # Never keep V1.1's 150ms delay, even from an existing settings file.
-        settings["dwell_ms"] = 0
-        return settings
+        payload = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            payload = {}
     except (OSError, ValueError, TypeError):
-        return dict(DEFAULTS)
+        payload = {}
+    settings = DEFAULTS | {k: payload[k] for k in DEFAULTS if k in payload}
+    settings = sanitize_hotkeys(settings)
+    try:
+        settings["period_ms"] = parse_period_ms(settings["period_ms"])
+    except ValueError:
+        settings["period_ms"] = 500
+    settings["region"] = RelativeRegion.from_settings(settings["region"]).as_list()
+    settings["tier"] = "small"
+    settings["dwell_ms"] = 0
+    return settings
 
 
 def write_settings(settings: dict) -> None:
@@ -63,9 +75,9 @@ def write_settings(settings: dict) -> None:
 class ReaderApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        root.title("游戏文字助手 · V1.2 Small 底座 / 系统自然语音")
-        root.geometry("690x710")
-        root.minsize(620, 630)
+        root.title("游戏文字助手 · V1.2 Small / 悬停 OCR 实验版")
+        root.geometry("760x860")
+        root.minsize(660, 710)
         root.protocol("WM_DELETE_WINDOW", self.close)
 
         self.settings = read_settings()
@@ -86,7 +98,17 @@ class ReaderApp:
         self.voice_report = "尚未扫描语音。"
         self.voices: list[tuple[str, str]] = []
         self.setting_hotkey = False
-        self.key_previous = False
+        self._binding_target = None
+        self._hotkey_previous = {k: is_key_down(self.settings[k]) for k in HOTKEY_FIELDS}
+        self._side_previous = {vk: is_key_down(vk) for vk in MOUSE_SIDE_VKS}
+        self.mouse_mode = "pointer"
+        self.mode_generation = 0
+        self.hover_ocr_busy = False
+        self._hover_last_text = ""
+        self._hover_next_due = time.monotonic() + 0.5
+        self.pending_full_capture = False
+        self._region_picker = None
+        self._choosing_region = False
         self.hover = HoverTracker(0)
         self.speech = SpeechWorker(on_error=lambda e: self.events.put(("tts_error", e)))
         self.speech.set_luna_config(self.settings.get("luna_config", ""))
