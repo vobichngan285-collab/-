@@ -61,11 +61,13 @@ def packages_from_json(stdout: str) -> list[NaturalVoice]:
         if not isinstance(location, str) or not location:
             continue
         root = Path(location)
-        if not root.is_dir() or package.lower() in seen:
+        # WindowsApps metadata may be readable even when Python cannot stat
+        # the protected package directory. Do not hide a real OS-listed voice.
+        if package.lower() in seen:
             continue
         name, license_version = _parse_tokens(root)
         if not name:
-            name = package.split(".")[-1]
+            name = package.rsplit(".", 2)[-2] if package.count(".") >= 2 else package
         found.append(NaturalVoice(package, str(root), name[:120], license_version[:40]))
         seen.add(package.lower())
     return sorted(found, key=lambda v: v.name.casefold())
