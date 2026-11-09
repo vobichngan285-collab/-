@@ -1,0 +1,43 @@
+name: Verify Luna-style natural voice architecture on Windows
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - exp/cloud-natural-voice-interface-20261109
+    paths:
+      - tools/luna_natural_architecture.py
+      - .github/workflows/verify-luna-natural.yml
+jobs:
+  architecture:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: x64
+      - name: Install official embedded voice SDK (no model or license copied)
+        shell: pwsh
+        run: |
+          python -m pip install "azure-cognitiveservices-speech-embedded>=1.51.0"
+          if ($LASTEXITCODE -ne 0) { throw 'Official embedded SDK not installable on this Windows runner' }
+      - name: Check source syntax, model metadata, independent process and SDK readiness
+        shell: pwsh
+        run: |
+          python -m compileall -q tools/luna_natural_architecture.py
+          if ($LASTEXITCODE -ne 0) { throw 'Source syntax invalid' }
+          python tools/luna_natural_architecture.py
+          if ($LASTEXITCODE -ne 0) { throw 'Isolated natural voice architecture failed' }
+          if (-not (Test-Path natural_voice_architecture_report.json)) { throw 'Missing architecture evidence' }
+          $report = Get-Content natural_voice_architecture_report.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ($report.fixture_tokens_xml_parse -ne 'passed') { throw 'Tokens.xml metadata parser failed' }
+          if (-not $report.unlicensed_synthesis_refused) { throw 'Unlicensed synthesis was not blocked' }
+          if ($report.separate_worker.status -ne 'ok') { throw 'Isolated worker did not respond' }
+          if (-not $report.separate_worker.sdk_embedded_api_importable) { throw 'Official EmbeddedSpeechConfig API unavailable' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Luna-Natural-Voice-Architecture-CI
+          path: natural_voice_architecture_report.json
+          retention-days: 30
+          if-no-files-found: error
