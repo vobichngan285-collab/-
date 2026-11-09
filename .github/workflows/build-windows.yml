@@ -113,6 +113,12 @@ jobs:
               Write-Output "Removed redundant weight: $name"
             }
           }
+          # Original V1.2 always passes use_cls=False, so classifying weights are unused.
+          $clsFiles = @(Get-ChildItem dist/GameTextReader/_internal/rapidocr -Recurse -Filter '*cls*.onnx' -ErrorAction SilentlyContinue)
+          foreach ($file in $clsFiles) {
+            Remove-Item $file.FullName -Force
+            Write-Output "Removed unused classifier: $($file.Name)"
+          }
       - name: Verify bundled models
         shell: pwsh
         run: |
