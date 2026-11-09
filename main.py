@@ -274,6 +274,10 @@ def packaged_guangrong_loader_selftest() -> int:
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
+    if "--luna-worker" in sys.argv:
+        # Packaged one-dir EXE starts this dedicated SDK worker instead of Tk.
+        from game_reader.luna_voice_worker import main as luna_worker_main
+        raise SystemExit(luna_worker_main())
     if "--self-test-ocr" in sys.argv:
         raise SystemExit(packaged_ocr_selftest())
     if "--self-test-tts" in sys.argv:
