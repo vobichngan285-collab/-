@@ -209,18 +209,21 @@ def packaged_app_selftest() -> int:
 
 
 def packaged_guangrong_loader_selftest() -> int:
-    """Execute the frozen EXE's *real* native helper with a CI-supplied fake DLL.
+    """Frozen EXE -> native Guangrong host -> CI fake DLL -> PCM bytes.
 
-    CI builds the fake DLL outside the portable package. No vendor binary is
-    required, and this is not proof that Guangrong's real DLL can initialize.
+    The test fake is supplied separately by CI and is NOT in the user ZIP.
+    This confirms IPC and PCM handling, not the real publisher's audio license.
     """
     from pathlib import Path
     from tempfile import gettempdir
-    import traceback
     import os
+    import threading
+    import traceback
+
     output = Path(gettempdir()) / "GameTextReader_guangrong_loader_selftest.txt"
+    bridge = None
     try:
-        from game_reader.guangrong_tts import list_guangrong_voices
+        from game_reader.guangrong_tts import list_guangrong_voices, GuangrongBridge
         testing_dll = os.environ.get("GR_CI_FAKE_DLL_PATH", "")
         if not testing_dll or not Path(testing_dll).is_file():
             raise RuntimeError("CI must supply independent fake Guangrong DLL")
@@ -230,13 +233,34 @@ def packaged_guangrong_loader_selftest() -> int:
         if voices != ["Native Host Test Voice"]:
             raise AssertionError("Frozen native host fake voice enumeration mismatch: "
                                  + repr(voices))
+        arrived = threading.Event()
+        audio_frames = []
+        failures = []
+        bridge = GuangrongBridge(testing_dll, on_error=failures.append)
+        # Verify real PCM reaches frozen Python. Don't route CI audio to a
+        # virtual/headless speaker, as actual speaker output is a separate test.
+        def accept_pcm(seq, pcm, sample_rate, bits, channels):
+            audio_frames.append((len(pcm), sample_rate, bits, channels))
+            arrived.set()
+        bridge._play_pcm = accept_pcm
+        bridge.select(0)
+        bridge.speak("你好，游戏文字助手语音测试。")
+        if not arrived.wait(6):
+            raise AssertionError("Frozen native helper did not return PCM: " + repr(failures))
+        if audio_frames != [(9600, 24000, 16, 1)]:
+            raise AssertionError("Wrong output PCM: " + repr(audio_frames))
+        if failures:
+            raise AssertionError("Native host reported an error: " + repr(failures))
         output.write_text(
-            "PASS\\nFrozen EXE -> native host -> fake Guangrong DLL enumerated 1 voice", 
+            "PASS\nFrozen EXE -> host -> fake DLL -> 9600 bytes of 24 kHz PCM",
             encoding="utf-8")
         return 0
     except BaseException:
-        output.write_text("FAIL\\n" + traceback.format_exc(), encoding="utf-8")
+        output.write_text("FAIL\n" + traceback.format_exc(), encoding="utf-8")
         return 1
+    finally:
+        if bridge is not None:
+            bridge.close()
 
 
 if __name__ == "__main__":
