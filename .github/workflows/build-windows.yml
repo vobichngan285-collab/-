@@ -2,7 +2,7 @@ name: Build V1.2 Small OCR with Windows-discovered installed natural voices
 on:
   workflow_dispatch:
   push:
-    branches: ['exp/v12-small-system-voice-discovery-20261109']
+    branches: ['exp/v12-small-voice-config-route-fix-20261109']
     paths:
       - 'game_reader/**'
       - 'main.py'
@@ -173,6 +173,27 @@ jobs:
           assert reply["stage"] in ("discovery_or_setup","synthesis","native_engine","unexpected","ipc_or_synthesis")
           assert "code" in reply
           print("PASS frozen worker protocol and classified error:", reply["stage"],reply["code"])
+          # Probe a real frozen worker reading a local file with Unicode and
+          # spaces in its pathname. Fake test value only; never ship a license.
+          from tempfile import TemporaryDirectory
+          with TemporaryDirectory(prefix="GameTextReader_语音 路径_") as local:
+              config = Path(local) / "config.json"
+              config.write_text(json.dumps({"MicrosoftWindows.Voice.License":
+                                            "FAKE_TEST_VALUE_NOT_A_LICENSE"}), encoding="utf-8")
+              for path, expected in ((str(config), "ok"),
+                                     (str(Path(local) / "missing.json"),
+                                      "local_voice_config_file_missing")):
+                  req = {"command": "check_config", "config_path": path}
+                  result = subprocess.run([exe, "--luna-worker"],
+                      input=json.dumps(req, ensure_ascii=False)+"\\n",
+                      capture_output=True, text=True, timeout=25)
+                  answer = json.loads(result.stdout.strip())
+                  assert answer["stage"] == "config_read", answer
+                  assert answer["code"] == expected, answer
+                  assert answer["ok"] == (expected == "ok"), answer
+                  assert "FAKE_TEST_VALUE_NOT_A_LICENSE" not in str(answer)
+                  assert path not in str(answer)
+              print("PASS frozen worker config read with Unicode path and redacted results")
           '@ | python -
           if ($LASTEXITCODE -ne 0) { throw 'Frozen natural voice worker failed' }
           if (Test-Path 'dist/GameTextReader/config..json') {
@@ -214,12 +235,12 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory release -Force | Out-Null
-          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_V12Base_SystemVoice_Discovery_Experimental_Windows_x64.zip -CompressionLevel Optimal -Force
-          $size = (Get-Item release/GameTextReader_V12Base_SystemVoice_Discovery_Experimental_Windows_x64.zip).Length
+          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_V12Base_NaturalVoice_ConfigRoute_Fix_Experimental_x64.zip -CompressionLevel Optimal -Force
+          $size = (Get-Item release/GameTextReader_V12Base_NaturalVoice_ConfigRoute_Fix_Experimental_x64.zip).Length
           Write-Output "Portable archive size: $size bytes"
       - uses: actions/upload-artifact@v4
         with:
-          name: GameTextReader-V12Base-SystemVoice-Discovery-Experimental
-          path: release/GameTextReader_V12Base_SystemVoice_Discovery_Experimental_Windows_x64.zip
+          name: GameTextReader-V12Base-NaturalVoice-ConfigRouteFix-Experimental
+          path: release/GameTextReader_V12Base_NaturalVoice_ConfigRoute_Fix_Experimental_x64.zip
           if-no-files-found: error
           retention-days: 30
