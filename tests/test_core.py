@@ -289,13 +289,15 @@ def test_medium_batch_isolation(monkeypatch, tmp_path):
         EngineType=SimpleNamespace(ONNXRUNTIME="onnxruntime"),
         OCRVersion=SimpleNamespace(PPOCRV6="PP-OCRv6")))
 
-    worker = mod.LocalOCR(medium_rec_batch_num=2)
+    worker = mod.LocalOCR(medium_rec_batch_num=2, medium_ort_threads=4)
     worker._load("small")
     worker._load("medium")
     assert "Rec.rec_batch_num" not in snapshots[0]
+    assert "EngineConfig.onnxruntime.intra_op_num_threads" not in snapshots[0]
     assert snapshots[0]["Rec.model_type"] == "small"
     assert snapshots[1]["Rec.model_type"] == "medium"
     assert snapshots[1]["Rec.rec_batch_num"] == 2
+    assert snapshots[1]["EngineConfig.onnxruntime.intra_op_num_threads"] == 4
     assert snapshots[0]["Det.model_path"] == snapshots[1]["Det.model_path"]
 
 
