@@ -89,7 +89,9 @@ class FakeSpeech:
 def fake_reader_for_hover_results():
     app = ReaderApp.__new__(ReaderApp)
     app.hover_ocr_busy = True
-    app.settings = {"period_ms": 500}
+    app.settings = {"period_ms": 500, "filter_english": False,
+                    "filter_numbers": False, "filter_symbols": False,
+                    "similarity_enabled": True, "similarity_threshold": 2}
     app.pending_full_capture = False
     app.mode_generation = 3
     app.mouse_mode = "hover"
@@ -268,6 +270,7 @@ def test_every_mode_key_press_switches_immediately_first_hover_second_pointer():
     app = ReaderApp.__new__(ReaderApp)
     app.root = FakeRoot()
     app.mouse_mode = "pointer"
+    app.settings = {"mode_voice_hint": False}
     app.mode_generation = 0
     app._hover_last_text = ""
     app.hover = Fake()
@@ -315,17 +318,17 @@ def test_stale_hover_crop_is_rejected_when_cursor_moves_or_foreground_changes(mo
     assert app.spoken_values == ["制作技能"]
 
 
-def test_desktop_icons_can_now_be_read_when_nearest_to_cursor(monkeypatch):
-    """The user wants the mouse to work on any page, including the desktop."""
+def test_local_region_reads_whole_crop_in_order_not_nearest(monkeypatch):
+    """Confirmed design: original full-screen OCR rules on a smaller screenshot."""
     import game_reader.app as mod
     from game_reader.hover_modes import cursor_still_near_capture
     monkeypatch.setattr(mod, "get_cursor", lambda: (450, 650))
     monkeypatch.setattr(mod, "foreground_class", lambda: "Progman")
     app = fake_reader_for_hover_results()
-    lines = [OCRLine("7 Days to Die", 400, 200, 530, 240),
-             OCRLine("DLSS", 400, 685, 490, 720)]
+    lines = [OCRLine("七日杀", 400, 200, 530, 240),
+             OCRLine("碎布", 400, 685, 490, 720)]
     app._handle_hover_result(3, lines, False, 45, (450, 650), "Progman")
-    assert app.spoken_values == ["DLSS"]
+    assert app.spoken_values == ["七日杀\n碎布"]
     assert cursor_still_near_capture((100, 200), (120, 220))
     assert not cursor_still_near_capture((100, 200), (800, 220))
 
