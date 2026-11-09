@@ -492,6 +492,8 @@ class ReaderApp:
             self.mouse_mode = next_mouse_mode(self.mouse_mode)
         self.mode_generation += 1
         self._hover_last_text = ""
+        self._hover_spoken_cursor = None
+        self._hover_spoken_foreground = None
         self.hover.reset()
         self.last_target = None
         self.speech.stop()
@@ -568,7 +570,8 @@ class ReaderApp:
         self.speak_selected("你好，这是电脑游戏文字助手的本地语音试听。")
 
     def copy_voice_report(self):
-        report = self.voice_report + "\nUI Automation: " + self.accessibility_status
+        report = (self.voice_report + "\n语音速度诊断：" + self.last_voice_timing +
+                  "\nUI Automation: " + self.accessibility_status)
         self.copy_text(report, "语音和界面诊断已复制。")
 
     def copy_error(self):
@@ -617,6 +620,12 @@ class ReaderApp:
             return False
         try:
             cursor = get_cursor()
+            captured_window = foreground_class()
+            if exclude_unrelated_desktop_text(captured_window):
+                if manual:
+                    self.status("当前在 Windows 桌面／任务栏；悬停 OCR 不朗读桌面图标。")
+                self._hover_next_due = time.monotonic() + self.settings["period_ms"] / 1000.0
+                return False
             monitor = monitor_rect_at_cursor()
             relative = RelativeRegion.from_settings(self.settings["region"])
             box = capture_box(relative, cursor, monitor)
@@ -636,7 +645,8 @@ class ReaderApp:
                     raise RuntimeError("局部截图尺寸与显示器范围不一致")
                 lines = self.ocr_worker.recognize(image, box[:2], "small")
                 self.events.put(("hover_ok", generation, lines, manual,
-                                 round((time.monotonic() - started) * 1000)))
+                                 round((time.monotonic() - started) * 1000),
+                                 cursor, captured_window))
             except Exception:
                 self.events.put(("hover_fail", generation,
                                  traceback.format_exc()))
@@ -644,7 +654,8 @@ class ReaderApp:
         return True
 
     def _handle_hover_result(self, generation: int, lines: list[OCRLine],
-                             manual: bool, elapsed: int):
+                             manual: bool, elapsed: int,
+                             capture_cursor=None, capture_foreground=None):
         self.hover_ocr_busy = False
         self._hover_next_due = time.monotonic() + self.settings["period_ms"] / 1000.0
         if self.pending_full_capture:
@@ -653,6 +664,13 @@ class ReaderApp:
             return
         if generation != self.mode_generation or self.mouse_mode != "hover":
             return
+        if capture_cursor is not None:
+            if (not cursor_still_near_capture(capture_cursor, get_cursor()) or
+                    foreground_class() != capture_foreground):
+                # Do not read a tooltip whose cursor has already left its
+                # location before OCR finishes. A new frame can catch up.
+                self._hover_last_text = ""
+                return
         regions = build_reading_regions(lines)
         text = "\n".join(region.text for region in regions).strip()
         normalized = normalized_text(text)
@@ -669,6 +687,8 @@ class ReaderApp:
         if changed or manual:
             self.speech.stop()
             self.update_output(text)
+            self._hover_spoken_cursor = capture_cursor
+            self._hover_spoken_foreground = capture_foreground
             self.speak_selected(text[:1900])
             self.status(f"局部 OCR 已识别 {len(regions)} 个朗读区域，"
                         f"耗时 {elapsed} 毫秒；"
@@ -680,6 +700,8 @@ class ReaderApp:
         self.expires_at = None
         self.lines = []
         self.last_target = None
+        self._hover_spoken_cursor = None
+        self._hover_spoken_foreground = None
         self.hover.reset()
         self.speech.stop()
         if self.overlay is not None:
@@ -758,8 +780,9 @@ class ReaderApp:
                     self.status("识别失败。点击“复制失败诊断”查看错误。")
                     self.update_output("识别失败。")
                 elif kind == "hover_ok":
-                    _, generation, lines, manual, milliseconds = event
-                    self._handle_hover_result(generation, lines, manual, milliseconds)
+                    _, generation, lines, manual, milliseconds, location, window_class = event
+                    self._handle_hover_result(generation, lines, manual, milliseconds,
+                                              location, window_class)
                 elif kind == "hover_fail":
                     _, generation, detail = event
                     self.hover_ocr_busy = False
@@ -797,6 +820,9 @@ class ReaderApp:
                             self.voice_note.set("未发现系统自然语音包；其它系统音色仍可使用。")
                     else:
                         self.voice_var.set("未找到可调用的本地语音")
+                elif kind == "tts_timing":
+                    self.last_voice_timing = event[1]
+                    self.status("语音速度诊断：" + event[1])
                 elif kind == "tts_error":
                     self.status("TTS 出错：" + event[1])
                 elif kind == "ui_error":
@@ -830,8 +856,10 @@ class ReaderApp:
                             self.capture()
                     elif field == "mode_vk":
                         self.toggle_mouse_mode()
-                    else:
+                    elif field == "local_vk":
                         self.start_hover_ocr(manual=True)
+                    elif field == "pick_vk":
+                        self.select_region()
 
             if self.expires_at is not None and time.monotonic() >= self.expires_at:
                 if self.mouse_mode == "pointer":
@@ -850,16 +878,26 @@ class ReaderApp:
                 if target != self.last_target:
                     if self.overlay is not None:
                         self.overlay.show(target)
-                    if target is None and self.last_target is not None:
+                    if self.last_target is not None:
+                        # Also cancel A -> B, not only A -> blank.
                         self.speech.stop()
                     self.last_target = target
                 to_read = self.hover.update(target, time.monotonic() * 1000)
                 if to_read is not None:
                     self.cues.play("hover")
                     self.speak_selected(to_read.text)
-            elif (self.mouse_mode == "hover" and not self.busy
-                  and time.monotonic() >= self._hover_next_due):
-                self.start_hover_ocr(manual=False)
+            elif self.mouse_mode == "hover":
+                if self._hover_spoken_cursor is not None:
+                    moved = not cursor_still_near_capture(
+                        self._hover_spoken_cursor, get_cursor())
+                    focus_changed = (self._hover_spoken_foreground is not None and
+                                     foreground_class() != self._hover_spoken_foreground)
+                    if moved or focus_changed:
+                        self.speech.stop()
+                        self._hover_spoken_cursor = None
+                        self._hover_last_text = ""
+                if not self.busy and time.monotonic() >= self._hover_next_due:
+                    self.start_hover_ocr(manual=False)
         except Exception as exc:
             self.status("鼠标／快捷键监听异常：" + str(exc))
         self.root.after(20, self.poll_input)
