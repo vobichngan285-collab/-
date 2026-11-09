@@ -7,8 +7,7 @@ pywin32>=306
 winrt-Windows.Media.SpeechSynthesis==4!10.0.28000.2957
 winrt-Windows.Media.Core==4!10.0.28000.2957
 winrt-Windows.Media.Playback==4!10.0.28000.2957
-# Official Microsoft embedded/offline speech SDK; voice models and private licenses NOT shipped.
-azure-cognitiveservices-speech-embedded>=1.51.0
+# Luna natural voice uses official unmodified LunaSubprocess64.exe (no Python embedded SDK).
 
 # Windows MSAA/UIA accessibility for Tk/ttk widgets (MIT)
 tk-uia==0.8.0
