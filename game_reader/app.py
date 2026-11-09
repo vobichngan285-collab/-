@@ -1135,7 +1135,7 @@ class ReaderApp:
             if self._choosing_region or self.setting_hotkey:
                 pass
             elif (self.mouse_mode == "pointer" and not self.busy and self.lines
-                  and time.monotonic() >= self._mode_announcement_until):
+                  and time.monotonic() >= getattr(self, "_mode_announcement_until", 0.0)):
                 # No scene-change detector. Simply discard a screenshot when
                 # the user has switched to another actual Windows window.
                 if (self._full_capture_window and
