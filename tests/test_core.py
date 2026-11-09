@@ -267,3 +267,70 @@ def test_guangrong_host_is_a_dedicated_windows_exe():
     from game_reader.guangrong_tts import list_guangrong_voices
     assert "subprocess" in inspect.getsource(list_guangrong_voices)
 
+
+def test_medium_batch_isolation(monkeypatch, tmp_path):
+    """Medium batch tuning must not change the proven Small recognizer."""
+    import sys
+    from types import SimpleNamespace
+    from game_reader import ocr_backend as mod
+    for name in {n for filenames in mod.TIERS.values() for n in filenames}:
+        (tmp_path / name).write_bytes(b"x" * 100_001)
+    monkeypatch.setattr(mod, "model_root", lambda: tmp_path)
+
+    snapshots = []
+
+    class FakeRapid:
+        def __init__(self, params):
+            snapshots.append(dict(params))
+
+    monkeypatch.setitem(sys.modules, "rapidocr", SimpleNamespace(
+        RapidOCR=FakeRapid,
+        ModelType=SimpleNamespace(SMALL="small", MEDIUM="medium"),
+        EngineType=SimpleNamespace(ONNXRUNTIME="onnxruntime"),
+        OCRVersion=SimpleNamespace(PPOCRV6="PP-OCRv6")))
+
+    worker = mod.LocalOCR(medium_rec_batch_num=2)
+    worker._load("small")
+    worker._load("medium")
+    assert "Rec.rec_batch_num" not in snapshots[0]
+    assert snapshots[0]["Rec.model_type"] == "small"
+    assert snapshots[1]["Rec.model_type"] == "medium"
+    assert snapshots[1]["Rec.rec_batch_num"] == 2
+    assert snapshots[0]["Det.model_path"] == snapshots[1]["Det.model_path"]
+
+
+def test_abandoned_prewarm_never_overwrites_capture_model(monkeypatch):
+    from game_reader.ocr_backend import LocalOCR
+    worker = LocalOCR()
+    loads = []
+    monkeypatch.setattr(worker, "_load", lambda tier: loads.append(tier))
+    assert worker.prepare("small", still_current=lambda: False) is None
+    assert loads == []
+
+    # The initially valid callback became obsolete while queued behind the
+    # OCR lock. Simulate the change between the two guard checks.
+    state = iter([True, False])
+    assert worker.prepare("medium", still_current=lambda: next(state)) is None
+    assert loads == []
+
+
+def test_medium_ocr_metrics_expose_lock_and_load(monkeypatch):
+    from types import SimpleNamespace
+    from PIL import Image
+    from game_reader.ocr_backend import LocalOCR
+    worker = LocalOCR(medium_rec_batch_num=2)
+    class Fake:
+        def __call__(self, image, **kwargs):
+            return SimpleNamespace(boxes=None, txts=None, scores=None, elapse_list=[1, 2, 3])
+    def load(tier):
+        worker.loaded_tier = tier
+        worker.engine = Fake()
+    monkeypatch.setattr(worker, "_load", load)
+    lines, metrics = worker.recognize_timed(Image.new("RGB", (64, 64)), (0, 0), "medium")
+    assert not lines
+    assert metrics["rec_batch_num"] == 2
+    assert metrics["model_lock_wait_ms"] >= 0
+    assert metrics["model_load_ms"] >= 0
+    assert metrics["model_ms"] >= metrics["model_lock_wait_ms"]
+    assert metrics["raw_lines"] == 0
+    assert metrics["accepted_lines"] == 0
