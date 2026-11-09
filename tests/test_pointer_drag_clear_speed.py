@@ -128,6 +128,7 @@ def test_success_chime_only_when_pointer_ocr_has_real_readable_regions():
             self.status = lambda msg: None
             self.root = SimpleNamespace(after=lambda ms, f: None)
     app = FakeApp()
+    app.poll_messages = lambda: None  # Fake Tk timer callback; the test invokes the real method directly.
     app.events.put(("ocr_ok", 2, [], 90, 100))
     ReaderApp.poll_messages(app)
     assert app.cue_hits == []
