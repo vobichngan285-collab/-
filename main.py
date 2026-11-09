@@ -208,6 +208,36 @@ def packaged_app_selftest() -> int:
             root.destroy()
 
 
+def packaged_guangrong_loader_selftest() -> int:
+    """Exercise the frozen EXE's own spawned child and native DLL error path.
+
+    This uses an intentionally invalid PE stub, NOT the publisher's package.
+    A PASS proves PyInstaller doesn't shadow the external file. It does NOT
+    prove real Microsoft natural voices work or have been installed.
+    """
+    from pathlib import Path
+    from tempfile import TemporaryDirectory, gettempdir
+    import traceback
+    output = Path(gettempdir()) / "GameTextReader_guangrong_loader_selftest.txt"
+    try:
+        from game_reader.guangrong_tts import list_guangrong_voices
+        with TemporaryDirectory(prefix="grtts-frozen-probe-") as d:
+            invalid = Path(d) / "grtts_x64.dll"
+            invalid.write_bytes(b"This is deliberately not a real DLL")
+            voices, error = list_guangrong_voices(str(invalid), timeout=15)
+            if voices:
+                raise AssertionError("Invalid vendor library unexpectedly returned voices")
+            if "WinError 193" not in error:
+                raise AssertionError("Expected native architecture error, got: " + error)
+            if "PyInstallerImportError" in error:
+                raise AssertionError("PyInstaller loader hook still intercepted the native call")
+        output.write_text("PASS\nFrozen child native loader returned WinError 193 without confusing PyInstaller errors", encoding="utf-8")
+        return 0
+    except BaseException:
+        output.write_text("FAIL\n" + traceback.format_exc(), encoding="utf-8")
+        return 1
+
+
 if __name__ == "__main__":
     multiprocessing.freeze_support()
     if "--self-test-ocr" in sys.argv:
@@ -218,5 +248,7 @@ if __name__ == "__main__":
         raise SystemExit(packaged_ui_selftest())
     if "--self-test-app" in sys.argv:
         raise SystemExit(packaged_app_selftest())
+    if "--self-test-guangrong-loader" in sys.argv:
+        raise SystemExit(packaged_guangrong_loader_selftest())
     from game_reader.app import run
     run()
