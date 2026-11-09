@@ -204,3 +204,34 @@ def test_global_key_poll_handles_side_hotkeys_once_per_press(monkeypatch):
     app.poll_input()
     assert hits == ["mode", "local", "fullscreen"]
     assert app.root.waits == [20] * 6
+
+
+def test_real_tk_picker_opens_selects_and_cancels_on_windows():
+    import sys
+    if sys.platform != "win32":
+        pytest.skip("Windows Tk alpha overlay test")
+    import tkinter as tk
+    from types import SimpleNamespace
+    from game_reader.region_picker import ScreenRegionPicker
+
+    root = tk.Tk()
+    root.withdraw()
+    choices = []
+    try:
+        picker = ScreenRegionPicker(
+            root, (0, 0, 1024, 768), RelativeRegion(-300, -140, 600, 400),
+            choices.append)
+        root.update()
+        picker._start_drag(SimpleNamespace(x=180, y=200))
+        picker._drag(SimpleNamespace(x=760, y=630))
+        picker._finish_drag(SimpleNamespace(x=760, y=630))
+        assert choices[0].as_list() == [-332, -184, 580, 430]
+
+        second = ScreenRegionPicker(
+            root, (0, 0, 1024, 768), RelativeRegion(-300, -140, 600, 400),
+            choices.append)
+        root.update()
+        second.cancel()
+        assert choices == [RelativeRegion(-332, -184, 580, 430), None]
+    finally:
+        root.destroy()
