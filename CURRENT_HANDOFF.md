@@ -11,7 +11,7 @@
 - **正式 CI 通过：** https://github.com/vobichngan285-collab/-/actions/runs/42583872881 ，26 项单元测试、真实官方模型 Small/Medium 中英文 OCR、冻结 EXE、无障碍绿色框、SAPI/WinRT 合成和模拟广荣 PCM 通路回归通过（不等于用户电脑实测或真实广荣发声）。
 - **V1.7 ZIP：** https://github.com/vobichngan285-collab/-/actions/runs/42583872881/artifacts/13658427538 ；内层 `GameTextReader_V1.7_Medium_CPU2_Windows_x64_Portable.zip`，194,448,729 bytes，SHA256 `df9a054ba44b041bc75b8906030bd41367d25a71dee96dcd346e54c3eef37287`；助手下载后对内外两层 ZIP 做了 CRC 校验，包含 `GameTextReader.exe` / `GuangrongHost.exe`，未捆绑第三方 DLL。此为 GitHub Actions 临时 artifact，不是永久 Release。
 - **实际改动仅限 OCR：** Small 模型/配置不变；Medium 使用同一个 Small DET + Medium REC，默认 REC batch 2、ONNX CPU 线程 2。预热改为 750ms 防抖并丢弃过期任务；OCR 诊断拆成 `model_lock_wait_ms`、`model_load_ms`、`inference_ms`，保留原 `model_ms`。保留 F8 单键截图、鼠标指向文字朗读、绿色坐标框、60 秒清空等功能。
-- **Windows CI 测试事实：** 固定相同输入，batch6→batch2 在一轮测试约快 5% 且文字/坐标相同。固定 2 线程相对自动线程，在最后**前后自动复测**后仅约 3%～4% 优势；此前单轮测到更大差距不稳定，不能宣称 Medium 获得数倍提速，也不能用云端 CPU 结果代替用户电脑的真实时间。Medium REC 是主要耗时来源，仍需进一步定位。
+- **Windows CI 测试事实：** 最后一次固定CPU2条件下，batch6→batch2：4行 559→550ms、18行 2124.5→1909ms，文字/坐标完全相同；此前另轮测试约快5%，波动存在。CPU2 对照自动线程在前后顺序反转复测后只快约3%～4%，早期更大改善不稳定。**不要声称数倍提速**，CI 也不代替用户电脑实际 F8 等待；Medium REC 仍是主要耗时来源。
 
 ## 2. 现在仍存在的两个问题
 
