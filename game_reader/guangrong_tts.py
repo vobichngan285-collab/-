@@ -68,6 +68,16 @@ def find_known_installed_guangrong() -> str:
     return ""
 
 
+def _native_trace(stage):
+    path = os.environ.get("GR_NATIVE_DEBUG_FILE")
+    if path:
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(stage + "\\n")
+        except OSError:
+            pass
+
+
 def load_guangrong_native(file: Path):
     """Load the isolated x64 vendor DLL via Windows' native loader.
 
@@ -75,19 +85,26 @@ def load_guangrong_native(file: Path):
     _internal DLL search directory, which can shadow external codec libraries.
     Only the dedicated vendor subprocess has its DLL search path reset.
     """
+    _native_trace("native-enter")
     if sys.platform != "win32":
         raise RuntimeError("广荣独立 DLL 仅支持 Windows")
     if not file.is_file() or file.name.lower() != "grtts_x64.dll":
         raise FileNotFoundError("缺少官方广荣 x64 原始运行库")
+    _native_trace("before-kernel-win-dll")
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    _native_trace("after-kernel-win-dll")
     kernel.SetDllDirectoryW.argtypes = [ctypes.c_wchar_p]
     kernel.SetDllDirectoryW.restype = ctypes.c_bool
+    _native_trace("before-reset-search")
     kernel.SetDllDirectoryW(None)  # restore ordinary Windows search in child
+    _native_trace("after-reset-search")
     kernel.LoadLibraryExW.argtypes = [ctypes.c_wchar_p, ctypes.c_void_p, ctypes.c_uint]
     kernel.LoadLibraryExW.restype = ctypes.c_void_p
     # LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS;
     # vendor dependencies are searched in the vendor's own directory first.
+    _native_trace("before-load-library-ex")
     handle = kernel.LoadLibraryExW(str(file), None, 0x00000100 | 0x00001000)
+    _native_trace("after-load-library-ex")
     if not handle:
         error = ctypes.get_last_error()
         reasons = {
