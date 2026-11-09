@@ -30,9 +30,10 @@ def enumerate_sapi_voices() -> list[tuple[str, str]]:
 
 
 class SpeechWorker:
-    def __init__(self, on_error=None):
+    def __init__(self, on_error=None, on_event=None):
         self._commands = Queue()
         self._on_error = on_error
+        self._on_event = on_event
         self._winrt = None  # create WinRT media player only if WinRT voice is selected
         self._luna_natural = None
         self._luna_config_path = ""
@@ -86,7 +87,9 @@ class SpeechWorker:
                             if self._luna_natural is not None:
                                 self._luna_natural.close()
                             self._luna_natural = LunaNaturalBridge(
-                                self._luna_config_path, arg, on_error=self._on_error)
+                                self._luna_config_path, arg, on_error=self._on_error,
+                                on_event=self._on_event)
+                            self._luna_natural.warmup()
                             self._luna_natural.set_rate(self._rate)
                             self._luna_natural.set_volume(self._volume)
                         elif arg.startswith("winrt:"):
@@ -134,7 +137,8 @@ class SpeechWorker:
                             self._luna_config_path = selected_path
                             self._natural_voice_id = selected_id
                             self._luna_natural = LunaNaturalBridge(
-                                selected_path, selected_id, on_error=self._on_error)
+                                selected_path, selected_id, on_error=self._on_error,
+                                on_event=self._on_event)
                             self._luna_natural.set_rate(self._rate)
                             self._luna_natural.set_volume(self._volume)
                         self._mode = "natural"
