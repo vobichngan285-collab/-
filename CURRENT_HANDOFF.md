@@ -1,5 +1,16 @@
 # Windows 游戏文字助手｜当前交接（2026-11-09 · V2.0 原版 Luna）
 
+## 最新进展｜2026-11-10 Windows Blue Star OCR 清脆提示、自由框选、手动清除及速度修复（已构建）
+
+- **当前活跃项目：** Windows 11 游戏 OCR，安卓蓝星向导继续搁置。原仓库不变：`vobichngan285-collab/-`。用户已授权本轮代码和构建。
+- **新独立分支：** `feat/windows-v12-cursor-drag-clear-speed-20261110`；**Windows 实际构建 Commit：** `d5720f6924471200b3f2b68cc5a42a7c74f7c653`。从清爽蓝色大字 UI 源码 `6f1a78125c3fab9e7b0d04f7ac0180ea266a3b69` 起步；没有覆盖旧包、旧分支或 main 应用代码。
+- **三项用户确认功能：** 默认模式 OCR 有**过滤后可朗读文字**才发出约145ms 清脆完成叮声，设置里可关；F11（可设其他单键）以**按快捷键时实际鼠标位置**为十字起点，鼠标左键任意方向拖动、松开即按选中矩形立即 OCR，保存相对 X/Y 偏移，淡绿框与后续局部扫描框使用同一区域；默认 F6（可自定义、冲突检查）立即清空所有旧 OCR 结果、框和语音并令进行中的旧结果失效，原 60 秒自动失效不变。
+- **速度与健壮性：** 修复指向文字朗读的 `spoken` 未赋值引用风险；局部 OCR 完成后不重复等待完整扫描周期；按 generation 丢弃过时语音队列；减少局部截图的不必要 RGB 转换，三个截图路径串行共用 Small OCR 模型锁；新增截图/推理时间诊断，清除中途 OCR 时立即释放 UI busy。**没有改动 PP-OCRv6 Small 权重、原版 LunaTranslator 原生 EXE、用户私人配置或读屏控件架构**。
+- **GitHub Windows CI 已确认：** [run 42684557197](https://github.com/vobichngan285-collab/-/actions/runs/42684557197) `completed/success`，`87 passed, 1 warning`（无失败）；冻结 EXE 真实 Small OCR、SAPI/WinRT 接口、原生语音 worker 常驻协议、原版 Luna 哈希和 GPL 源码、三次 Tk 框选、可点击穿透边框、完整蓝色 GUI 启动及 UIA `Strategy.PROVIDED` / **37 个命名原生控件**均 PASS；ZIP 上传成功。
+- **下载**：[artifact 13704431105](https://github.com/vobichngan285-collab/-/actions/runs/42684557197/artifacts/13704431105)，名称 `GameTextReader-V12-CursorDrag-ClearKey-FastOCR`，**129817505 bytes**，过期时间 `2026-12-09T19:36:02Z`。这是 GitHub Actions 便携 ZIP，解压到**新目录**、勿覆盖既有语音可用版。公开构建不包含用户私人 `config..json`、语音模型密钥或识别文字。
+- **尚需用户真机验收：** Windows 11 / 《七日杀》实际鼠标起点与任意方向拖框、松手后 OCR、扫描框边缘坐标；F6 手动清理和默认模式叮声；真实云希/晓晓发声、延迟和 NVDA 等真实读屏器控件反馈。CI 通过不等于实际游戏和真实音色必然正常，也没有可靠的加速百分比。下一步根据用户测试日志定点修正，不恢复 Medium、不重做已放弃实验。
+
+
 **当前仅重点开发 Windows 11 游戏 OCR + 鼠标指向文字朗读；安卓「蓝星向导」暂时搁置，旧安卓离线 OCR/CRAFT 已放弃。** 本仓库 https://github.com/vobichngan285-collab/- 。新对话先读本文件即可，历史在 `RELEASE_STATUS.md`，不必重复旧实验。
 
 ## 最新：V2.0 原版 LunaTranslator 语音引擎和原始配置（2026-11-09）
