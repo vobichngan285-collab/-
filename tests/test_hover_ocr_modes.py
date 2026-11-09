@@ -330,7 +330,13 @@ def test_global_picker_reopens_repeatedly_after_cancel_on_real_windows(monkeypat
     import tkinter as tk
     import game_reader.app as mod
 
-    root = tk.Tk()
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        # GitHub hosted Python source runtime may lack Tcl auto.tcl,
+        # while the frozen EXE has its own bundled Tcl runtime. The latter
+        # is validated separately by the mandatory --self-test-picker.
+        pytest.skip("Hosted source Python Tcl runtime unavailable; frozen UI test required")
     root.geometry("500x400")
     root.update()
     app = ReaderApp.__new__(ReaderApp)
