@@ -55,6 +55,21 @@ jobs:
         run: |
           pyinstaller --clean --noconfirm --onedir --windowed --name GameTextReader --collect-data rapidocr --collect-binaries onnxruntime --collect-all winrt --collect-all tk_uia --add-data 'models;models' main.py
           if (-not (Test-Path dist/GameTextReader/GameTextReader.exe)) { throw 'EXE missing' }
+      - name: Enable Microsoft C++ compiler
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Build independent Guangrong x64 voice host (NO vendor binaries)
+        shell: pwsh
+        run: |
+          cl /nologo /O2 /EHsc /std:c++17 /Fe:dist/GameTextReader/GuangrongHost.exe native/guangrong_host.cpp
+          if ($LASTEXITCODE -ne 0) { throw 'Independent native TTS helper did not compile' }
+          if (-not (Test-Path dist/GameTextReader/GuangrongHost.exe)) { throw 'Native helper EXE missing' }
+      - name: Exercise standalone helper with CI-only fake voice
+        shell: pwsh
+        run: |
+          cl /nologo /LD /EHsc /std:c++17 /Fe:"$env:RUNNER_TEMP/fake_grtts_x64.dll" native/fake_grtts.cpp
+          if ($LASTEXITCODE -ne 0) { throw 'CI simulated voice DLL did not compile' }
+          python tools/test_grtts_host.py dist/GameTextReader/GuangrongHost.exe "$env:RUNNER_TEMP/fake_grtts_x64.dll"
+          if ($LASTEXITCODE -ne 0) { throw 'Native helper failed voice enumeration and PCM stream test' }
       - name: Remove duplicated RapidOCR model weights
         shell: pwsh
         run: |
@@ -141,6 +156,7 @@ jobs:
           $env:PYTHONPATH = (Get-Location).Path
           python -c "from game_reader.guangrong_setup import RELEASE_URL,ASSET_SHA256,runtime_directory; from game_reader.guangrong_tts import chosen_dll_path; assert 'github.com/shenguangrong/' in RELEASE_URL; assert len(ASSET_SHA256)==64; assert 'GameTextReader' in str(runtime_directory()); assert chosen_dll_path('') is None; print('Independent Guangrong setup ready, external vendor package not bundled')"
           if (Test-Path game_reader/baoyi_speech.py) { throw 'Unexpected unfinished BaoYi adapter' }
+          if (-not (Test-Path 'dist/GameTextReader/GuangrongHost.exe')) { throw 'Required native TTS host not bundled' }
           $binary = Get-ChildItem dist/GameTextReader -Recurse -Filter 'grtts*64.dll' -ErrorAction SilentlyContinue
           if ($binary) { throw 'Vendor DLL must be installed from original publisher on user action' }
       - name: Frozen EXE Guangrong native DLL loading regression test
