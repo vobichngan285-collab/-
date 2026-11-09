@@ -22,7 +22,8 @@ from .ocr_backend import LocalOCR
 from .win_screen import enable_dpi_awareness, get_cursor, is_key_down, grab_current_monitor
 from .speech import SpeechWorker, enumerate_sapi_voices
 from .voice_info import preferred_voice_index, narrator_package_names, voice_diagnostic
-from .ms_voice_discovery import discover_natural_voices, load_user_config
+from .ms_voice_discovery import (discover_natural_voices, load_user_config,
+                                 inspect_local_voice_config)
 from .cues import CuePlayer
 
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "GameTextReader"
@@ -275,14 +276,14 @@ class ReaderApp:
             filetypes=[("JSON 配置", "*.json"), ("所有文件", "*")])
         if not selected:
             return
-        license_text, _ = load_user_config(selected)
-        if not license_text:
-            self.status("未找到本机可用的 Voice.License 配置字段；原文件未修改。")
+        state = inspect_local_voice_config(selected)
+        if state != "ok":
+            self.status("原版配置检查未通过：" + state + "；原文件未修改。")
             return
         self.settings["luna_config"] = selected
         self.speech.set_luna_config(selected)
         self.persist()
-        self.status("本机语音配置已选择。请重新扫描语音并点击试听。")
+        self.status("本机配置路径已更新，许可字段存在（不代表 SDK 已授权）。请点击试听。")
         self.scan_voices()
 
     def scan_voices(self):
@@ -294,7 +295,8 @@ class ReaderApp:
                 voices = [(f"natural:{v.package}", v.ui_label) for v in natural]
                 voices.extend(enumerate_sapi_voices())
                 packages = narrator_package_names()
-                has_config = bool(load_user_config(self.settings.get("luna_config", ""))[0])
+                has_config = inspect_local_voice_config(
+                    self.settings.get("luna_config", "")) == "ok"
                 self.events.put(("voices", voices, packages, len(natural), has_config))
             except Exception as exc:
                 self.events.put(("tts_error", "语音扫描失败：" + type(exc).__name__))
@@ -307,8 +309,22 @@ class ReaderApp:
             self.speech.set_voice(self.settings["voice"])
             self.persist()
 
+    def speak_selected(self, text: str):
+        # Do NOT rely on the speech thread having applied an old
+        # set_luna_config() event. Each natural voice request carries its
+        # current GUI voice and config path as one immutable queue payload.
+        index = self.voice_select.current()
+        voice_id = (self.voices[index][0] if 0 <= index < len(self.voices)
+                    else self.settings.get("voice", ""))
+        if voice_id.startswith("natural:"):
+            self.speech.speak(
+                text, natural_voice_id=voice_id,
+                config_path=self.settings.get("luna_config", ""))
+        else:
+            self.speech.speak(text)
+
     def test_voice(self):
-        self.speech.speak("你好，这是电脑游戏文字助手的本地语音试听。")
+        self.speak_selected("你好，这是电脑游戏文字助手的本地语音试听。")
 
     def copy_voice_report(self):
         report = self.voice_report + "\nUI Automation: " + self.accessibility_status
@@ -478,7 +494,7 @@ class ReaderApp:
                 to_read = self.hover.update(target, time.monotonic() * 1000)
                 if to_read is not None:
                     self.cues.play("hover")
-                    self.speech.speak(to_read.text)
+                    self.speak_selected(to_read.text)
         except Exception as exc:
             self.status("鼠标 / 边框监听异常：" + str(exc))
         self.root.after(20, self.poll_input)
