@@ -1,4 +1,4 @@
-"""Windows CI A/B: Medium REC batches 6 (V1.6) vs 2/4 (candidate).
+"""Windows CI A/B: Medium REC batch 6 vs 2/4, all at fixed two ONNX CPU threads.
 
 Generate only synthetic game menus, never capture a user screen.
 This is CPU CI evidence, not a claim about the user's actual Windows 11 PC.
@@ -56,7 +56,7 @@ def signature(lines) -> dict:
 
 
 def run_batch(batch: int, scenes: dict) -> dict:
-    engine = LocalOCR(medium_rec_batch_num=batch)
+    engine = LocalOCR(medium_rec_batch_num=batch, medium_ort_threads=2)
     warmup_ms = engine.prepare("medium")
     out = {"warmup_ms": warmup_ms, "scenes": {}}
     for name, image in scenes.items():
@@ -106,6 +106,7 @@ def main() -> None:
     result = {
         "warning": "Windows GitHub CI synthetic screenshots; not actual game or audio latency.",
         "baseline_batch": 6, "experimental_default_batch": 2,
+        "ort_cpu_threads": 2,
         "trials": trials, "comparisons": comparisons,
     }
     output = Path("medium_ocr_ab.json")
