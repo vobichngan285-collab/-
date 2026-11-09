@@ -94,6 +94,8 @@ def fake_reader_for_hover_results():
     app.mode_generation = 3
     app.mouse_mode = "hover"
     app._hover_last_text = ""
+    app._hover_spoken_cursor = None
+    app._hover_spoken_foreground = None
     app.speech = FakeSpeech()
     app.output_values = []
     app.spoken_values = []
@@ -104,20 +106,23 @@ def fake_reader_for_hover_results():
     return app
 
 
-def test_periodic_hover_ocr_speaks_once_per_new_text_and_manual_can_repeat():
+def test_periodic_hover_ocr_speaks_once_per_new_text_and_manual_can_repeat(monkeypatch):
+    import game_reader.app as mod
+    monkeypatch.setattr(mod, "get_cursor", lambda: (150, 130))
+    monkeypatch.setattr(mod, "foreground_class", lambda: "GameWindow")
     app = fake_reader_for_hover_results()
     lines = [OCRLine("制作技能", 100, 120, 210, 148)]
-    app._handle_hover_result(3, lines, False, 35)
+    app._handle_hover_result(3, lines, False, 35, (150, 130), "GameWindow")
     assert app.spoken_values == ["制作技能"]
     assert app._hover_last_text == "制作技能"
-    app._handle_hover_result(3, lines, False, 31)
+    app._handle_hover_result(3, lines, False, 31, (150, 130), "GameWindow")
     assert app.spoken_values == ["制作技能"]
-    app._handle_hover_result(3, lines, True, 40)
+    app._handle_hover_result(3, lines, True, 40, (150, 130), "GameWindow")
     assert app.spoken_values == ["制作技能", "制作技能"]
     app._handle_hover_result(3, [OCRLine("技能详情", 90, 80, 200, 105)],
-                             False, 45)
+                             False, 45, (150, 130), "GameWindow")
     assert app.spoken_values[-1] == "技能详情"
-    app._handle_hover_result(3, [], False, 31)
+    app._handle_hover_result(3, [], False, 31, (150, 130), "GameWindow")
     assert app._hover_last_text == ""
 
 
@@ -305,19 +310,22 @@ def test_stale_hover_crop_is_rejected_when_cursor_moves_or_foreground_changes(mo
     app._handle_hover_result(3, old_text, False, 40,
                              (900, 550), "Progman")
     assert app.spoken_values == []
-    app._handle_hover_result(3, [OCRLine("制作技能", 400, 350, 550, 380)],
+    app._handle_hover_result(3, [OCRLine("制作技能", 850, 530, 960, 565)],
                              False, 40, (901, 551), "GameWindow")
     assert app.spoken_values == ["制作技能"]
 
 
-def test_windows_desktop_icons_are_never_read_as_game_tooltips():
-    from game_reader.hover_modes import (
-        cursor_still_near_capture, exclude_unrelated_desktop_text,
-    )
-    assert exclude_unrelated_desktop_text("Progman")
-    assert exclude_unrelated_desktop_text("WorkerW")
-    assert exclude_unrelated_desktop_text("Shell_TrayWnd")
-    assert not exclude_unrelated_desktop_text("GameWindow")
+def test_desktop_icons_can_now_be_read_when_nearest_to_cursor(monkeypatch):
+    """The user wants the mouse to work on any page, including the desktop."""
+    import game_reader.app as mod
+    from game_reader.hover_modes import cursor_still_near_capture
+    monkeypatch.setattr(mod, "get_cursor", lambda: (450, 650))
+    monkeypatch.setattr(mod, "foreground_class", lambda: "Progman")
+    app = fake_reader_for_hover_results()
+    lines = [OCRLine("7 Days to Die", 400, 200, 530, 240),
+             OCRLine("DLSS", 400, 685, 490, 720)]
+    app._handle_hover_result(3, lines, False, 45, (450, 650), "Progman")
+    assert app.spoken_values == ["DLSS"]
     assert cursor_still_near_capture((100, 200), (120, 220))
     assert not cursor_still_near_capture((100, 200), (800, 220))
 
