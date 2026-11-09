@@ -369,3 +369,36 @@ def test_global_picker_reopens_repeatedly_after_cancel_on_real_windows(monkeypat
             assert float(root.attributes("-alpha")) == pytest.approx(1.0)
     finally:
         root.destroy()
+
+
+def test_f11_opens_picker_globally_and_window_switch_clears_old_ocr(monkeypatch):
+    import game_reader.app as mod
+    class FakeRoot:
+        def after(self, ms, callback):
+            pass
+        def state(self):
+            return "iconic"
+    app = ReaderApp.__new__(ReaderApp)
+    app.closed = False
+    app.root = FakeRoot()
+    app._choosing_region = False
+    app.setting_hotkey = False
+    app.settings = {"vk": 119, "mode_vk": 120,
+                    "local_vk": 121, "pick_vk": 122, "period_ms": 500}
+    app._hotkey_previous = {x: False for x in ("vk","mode_vk","local_vk","pick_vk")}
+    app.expires_at = None
+    app.mouse_mode = "pointer"
+    app.busy = False
+    app.lines = [OCRLine("旧桌面图标", 10, 10, 90, 40)]
+    app._full_capture_window = 100
+    calls = []
+    app.select_region = lambda: calls.append("picker")
+    app.invalidate = lambda reason: calls.append("old-coords-cleared")
+    app.status = lambda message: calls.append("unexpected")
+    keys = {119: False, 120: False, 121: False, 122: True}
+    monkeypatch.setattr(mod, "is_key_down", lambda vk: keys.get(vk, False))
+    monkeypatch.setattr(mod, "foreground_window_id", lambda: 200)
+    app.poll_input()
+    assert calls == ["picker", "old-coords-cleared"]
+    app.poll_input()
+    assert calls == ["picker", "old-coords-cleared", "old-coords-cleared"]
