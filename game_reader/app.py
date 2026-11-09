@@ -1,8 +1,8 @@
 """Windows 11 offline game menu OCR: immediate pointer reading + accessible UI.
 
-The F8 capture is one-shot. Between captures only low-resolution pixels are
-compared; NO continuous OCR, game injection, online service or private voice
-license workaround is used.
+The F8 capture uses the original V1.2 Small OCR parameters. It never
+continuously scans the screen. Natural voices are discovered from installed
+Windows packages and require a locally supplied authorized configuration.
 """
 from __future__ import annotations
 
@@ -15,24 +15,23 @@ import traceback
 import tkinter as tk
 from pathlib import Path
 from queue import Empty, Queue
-from tkinter import ttk
+from tkinter import ttk, filedialog
 
 from .core import HoverTracker, OCRLine, hit_test, build_reading_regions
 from .ocr_backend import LocalOCR
 from .win_screen import enable_dpi_awareness, get_cursor, is_key_down, grab_current_monitor
 from .speech import SpeechWorker, enumerate_sapi_voices
 from .voice_info import preferred_voice_index, narrator_package_names, voice_diagnostic
-from .screen_change import signature_from_image, capture_signature, SceneGuard
+from .ms_voice_discovery import discover_natural_voices, load_user_config
 from .cues import CuePlayer
 
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "GameTextReader"
 CONFIG_PATH = CONFIG_DIR / "settings.json"
 ERROR_LOG = CONFIG_DIR / "last_ocr_error.txt"
 DEFAULTS = {"vk": 0x77, "hotkey_label": "F8", "tier": "small", "voice": "",
-            "rate": 0, "volume": 100, "dwell_ms": 0}
+            "rate": 0, "volume": 100, "dwell_ms": 0, "luna_config": ""}
 MODIFIER_KEYS = {16, 17, 18, 91, 92}
 RESULT_TTL_SECONDS = 60.0
-SCREEN_SAMPLE_SECONDS = 0.24
 
 
 def read_settings() -> dict:
@@ -44,8 +43,8 @@ def read_settings() -> dict:
         settings["vk"] = int(settings["vk"])
         if not 1 <= settings["vk"] <= 254 or settings["vk"] in MODIFIER_KEYS:
             raise ValueError("Invalid hotkey")
-        if settings["tier"] not in ("small", "medium"):
-            settings["tier"] = "small"
+        # Deliberately retain only the user-verified V1.2 Small model.
+        settings["tier"] = "small"
         # Never keep V1.1's 150ms delay, even from an existing settings file.
         settings["dwell_ms"] = 0
         return settings
@@ -63,19 +62,23 @@ def write_settings(settings: dict) -> None:
 class ReaderApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        root.title("游戏文字助手 V1.2 · 离线")
-        root.geometry("610x650")
-        root.minsize(560, 590)
+        root.title("游戏文字助手 · V1.2 Small 底座 / 系统自然语音")
+        root.geometry("690x710")
+        root.minsize(620, 630)
         root.protocol("WM_DELETE_WINDOW", self.close)
 
         self.settings = read_settings()
+        app_dir = (Path(sys.executable).resolve().parent if getattr(sys, "frozen", False)
+                   else Path(__file__).resolve().parents[1])
+        # Prefer an actual local user file, not a hard-coded model path.
+        if (app_dir / "config..json").is_file():
+            self.settings["luna_config"] = str(app_dir / "config..json")
         self.events: Queue[tuple] = Queue()
         self.lines: list[OCRLine] = []
         self.ocr_worker = LocalOCR()
         self.busy = False
         self.closed = False
         self.capture_id = 0
-        self.scene_state = None
         self.expires_at = None
         self.last_target = None
         self.last_ocr_error = ""
@@ -85,6 +88,7 @@ class ReaderApp:
         self.key_previous = False
         self.hover = HoverTracker(0)
         self.speech = SpeechWorker(on_error=lambda e: self.events.put(("tts_error", e)))
+        self.speech.set_luna_config(self.settings.get("luna_config", ""))
         self.speech.set_rate(self.settings["rate"])
         self.speech.set_volume(self.settings["volume"])
         self.cues = CuePlayer()
@@ -101,17 +105,14 @@ class ReaderApp:
         self.scan_voices()
         self.root.after(25, self.poll_input)
         self.root.after(40, self.poll_messages)
-        self.scene_thread = threading.Thread(target=self.monitor_scene, daemon=True,
-                                             name="LowResolutionSceneGuard")
-        self.scene_thread.start()
 
     def create_widgets(self):
         p = ttk.Frame(self.root, padding=12)
         p.pack(fill="both", expand=True)
-        ttk.Label(p, text="游戏文字助手 V1.2",
+        ttk.Label(p, text="游戏文字助手 · V1.2 Small OCR",
                   font=("Microsoft YaHei UI", 16, "bold")).pack(anchor="w")
         ttk.Label(p, text="按 F8 截图识别，鼠标进入文字区域立刻朗读；"
-                  "60 秒或检测到画面切换时自动清空旧结果。",
+                  "识别结果保留 60 秒。系统自然语音需先试听确认。",
                   wraplength=570).pack(anchor="w", pady=(2, 8))
         keys = ttk.LabelFrame(p, text="截图热键", padding=8)
         keys.pack(fill="x", pady=3)
@@ -121,19 +122,11 @@ class ReaderApp:
         ttk.Label(keys, text="按左侧按钮后直接按单键；Esc 取消。").pack(
             side="left", padx=10)
 
-        self.tier_var = tk.StringVar(value=self.settings["tier"])
         models = ttk.LabelFrame(p, text="离线 OCR 模型", padding=8)
         models.pack(fill="x", pady=3)
-        self.small_radio = ttk.Radiobutton(models, text="PP-OCRv6 Small · 速度优先",
-                                           variable=self.tier_var, value="small",
-                                           command=self.change_model)
-        self.small_radio.pack(anchor="w")
-        self.medium_radio = ttk.Radiobutton(models, text="PP-OCRv6 Medium · 识别优先",
-                                            variable=self.tier_var, value="medium",
-                                            command=self.change_model)
-        self.medium_radio.pack(anchor="w")
+        ttk.Label(models, text="PP-OCRv6 Small · V1.2 原始检测设置（唯一模型）").pack(anchor="w")
 
-        voice_frame = ttk.LabelFrame(p, text="本地语音（SAPI / Windows Runtime）", padding=8)
+        voice_frame = ttk.LabelFrame(p, text="本地语音（系统已安装自然音色 / SAPI / WinRT）", padding=8)
         voice_frame.pack(fill="x", pady=3)
         self.voice_var = tk.StringVar(value="正在扫描本地语音...")
         self.voice_select = ttk.Combobox(voice_frame, textvariable=self.voice_var,
@@ -156,10 +149,17 @@ class ReaderApp:
                                             command=self.copy_voice_report)
         self.voice_diag_button.pack(side="left", padx=5)
 
-        self.voice_note = tk.StringVar(value="讲述人专用云希/晓晓不一定开放给第三方应用。")
+        self.voice_note = tk.StringVar(value="扫描到自然语音包仅代表已安装；试听成功后才算真正可朗读。")
         self.voice_note_label = ttk.Label(voice_frame, textvariable=self.voice_note,
                                           wraplength=560)
         self.voice_note_label.pack(anchor="w", pady=(5, 0))
+        import_row = ttk.Frame(voice_frame)
+        import_row.pack(fill="x", pady=4)
+        self.import_luna_button = ttk.Button(
+            import_row, text="选择本机原版语音配置", command=self.import_luna_config)
+        self.import_luna_button.pack(side="left")
+        ttk.Label(import_row, text="原始 config..json 留在本机；不写入 GitHub。").pack(
+            side="left", padx=6)
 
         rate_row = ttk.Frame(voice_frame)
         rate_row.pack(fill="x", pady=3)
@@ -207,8 +207,7 @@ class ReaderApp:
         self.output.configure(yscrollcommand=scroll.set)
         self.output.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
-        ttk.Label(p, text="场景变化检测只对低分辨率画面比对，不连续识字。"
-                  "动态游戏画面可能误判；按 F8 可随时刷新。",
+        ttk.Label(p, text="已关闭旧的画面变化检测；保留 V1.2 原始截图与 Small OCR 参数。",
                   wraplength=570).pack(anchor="w", pady=(6, 0))
 
     def enable_accessibility(self):
@@ -218,6 +217,7 @@ class ReaderApp:
             for widget, label in (
                 (self.key_button, "设置单键截图快捷键"),
                 (self.voice_select, "选择本地 TTS 声音"),
+                (self.import_luna_button, "选择原版语音配置文件"),
                 (self.rate_slider, "语速"),
                 (self.volume_slider, "音量"),
                 (self.output, "当前截图识别的文字"),
@@ -269,20 +269,35 @@ class ReaderApp:
         self.persist()
         self.status(f"截图热键已设置：{event.keysym}")
 
-    def change_model(self):
-        self.settings["tier"] = self.tier_var.get()
+    def import_luna_config(self):
+        selected = filedialog.askopenfilename(
+            parent=self.root, title="选择你电脑中的原版 config..json",
+            filetypes=[("JSON 配置", "*.json"), ("所有文件", "*")])
+        if not selected:
+            return
+        license_text, _ = load_user_config(selected)
+        if not license_text:
+            self.status("未找到本机可用的 Voice.License 配置字段；原文件未修改。")
+            return
+        self.settings["luna_config"] = selected
+        self.speech.set_luna_config(selected)
         self.persist()
+        self.status("本机语音配置已选择。请重新扫描语音并点击试听。")
+        self.scan_voices()
 
     def scan_voices(self):
         self.voice_select.configure(state="disabled")
-        self.voice_var.set("正在扫描...")
+        self.voice_var.set("正在扫描电脑已安装的语音包...")
         def work():
             try:
-                voices = enumerate_sapi_voices()
+                natural = discover_natural_voices()
+                voices = [(f"natural:{v.package}", v.ui_label) for v in natural]
+                voices.extend(enumerate_sapi_voices())
                 packages = narrator_package_names()
-                self.events.put(("voices", voices, packages))
+                has_config = bool(load_user_config(self.settings.get("luna_config", ""))[0])
+                self.events.put(("voices", voices, packages, len(natural), has_config))
             except Exception as exc:
-                self.events.put(("tts_error", str(exc)))
+                self.events.put(("tts_error", "语音扫描失败：" + type(exc).__name__))
         threading.Thread(target=work, daemon=True, name="VoiceDiscovery").start()
 
     def change_voice(self, _event=None):
@@ -330,7 +345,6 @@ class ReaderApp:
     def invalidate(self, reason: str):
         """Actually erase all text, coordinates, hover state and audio."""
         self.capture_id += 1
-        self.scene_state = None
         self.expires_at = None
         self.lines = []
         self.last_target = None
@@ -359,10 +373,9 @@ class ReaderApp:
             phase = "截图"
             try:
                 image, origin = grab_current_monitor()
-                signature = signature_from_image(image, origin)
                 phase = f"离线OCR推理（{tier}）"
                 lines = self.ocr_worker.recognize(image, origin, tier)
-                self.events.put(("ocr_ok", capture_id, lines, signature,
+                self.events.put(("ocr_ok", capture_id, lines,
                                  round((time.monotonic() - started) * 1000)))
             except Exception as exc:
                 self.events.put(("ocr_fail", capture_id,
@@ -370,40 +383,13 @@ class ReaderApp:
                                  traceback.format_exc()))
         threading.Thread(target=worker, daemon=True, name="OneShotOCR").start()
 
-    def monitor_scene(self):
-        """Only small screenshots; never OCR in this background thread."""
-        previous_state = None
-        guard = None
-        while not self.closed:
-            time.sleep(SCREEN_SAMPLE_SECONDS)
-            state = self.scene_state
-            if state is None or self.busy:
-                previous_state = None
-                guard = None
-                continue
-            if state is not previous_state:
-                previous_state = state
-                guard = SceneGuard(state[1])
-            capture_id, original = state
-            try:
-                current = capture_signature(original.origin, original.screen_size)
-                if guard.changed(current):
-                    if self.scene_state is state:
-                        self.events.put(("scene_changed", capture_id))
-                    previous_state = None
-                    guard = None
-            except Exception:
-                # Fail open on a transient capture error: the TTL still works.
-                previous_state = None
-                guard = None
-
     def poll_messages(self):
         try:
             while True:
                 event = self.events.get_nowait()
                 kind = event[0]
                 if kind == "ocr_ok":
-                    _, capture_id, lines, signature, milliseconds = event
+                    _, capture_id, lines, milliseconds = event
                     self.busy = False
                     self.read_btn.configure(state="normal")
                     if capture_id != self.capture_id:
@@ -414,7 +400,6 @@ class ReaderApp:
                     self.update_output("\n".join(region.text for region in self.lines))
                     if self.lines:
                         self.expires_at = time.monotonic() + RESULT_TTL_SECONDS
-                        self.scene_state = (capture_id, signature)
                     self.status(f"识别完成：{len(self.lines)} 个朗读区域；"
                                 f"耗时 {milliseconds} 毫秒。60 秒后自动清空。")
                     self.cues.play("complete")
@@ -432,13 +417,14 @@ class ReaderApp:
                         pass
                     self.status("识别失败。点击“复制失败诊断”查看错误。")
                     self.update_output("识别失败。")
-                elif kind == "scene_changed":
-                    if event[1] == self.capture_id and self.scene_state is not None:
-                        self.invalidate("检测到游戏画面变化，旧文字和框已全部清空；按 F8 重新识别。")
                 elif kind == "voices":
-                    _, voices, packages = event
+                    _, voices, packages, natural_count, has_config = event
                     self.voices = voices
-                    self.voice_report = voice_diagnostic(voices, packages)
+                    self.voice_report = (voice_diagnostic(
+                        [(v, n) for v, n in voices if not v.startswith("natural:")], packages)
+                        + f"\n系统扫描到自然语音包：{natural_count} 个"
+                        + f"\n已选择本地原配置：{has_config}"
+                        + "\n扫描到语音包不代表合成成功；本机试听才是验收。")
                     names = [name for _, name in voices]
                     self.voice_select.configure(values=names,
                           state="readonly" if names else "disabled")
@@ -446,17 +432,15 @@ class ReaderApp:
                         index = preferred_voice_index(voices, self.settings["voice"])
                         self.voice_select.current(index)
                         self.speech.set_voice(voices[index][0])
-                        available = any(n.lower() in label.lower()
-                                        for _, label in voices
-                                        for n in ("Yunxi", "Xiaoxiao"))
-                        if available:
-                            self.voice_note.set("已找到可调用的云希或晓晓，请点击试听确认。")
+                        if natural_count:
+                            self.voice_note.set(
+                                f"已发现 {natural_count} 个系统自然语音包，"
+                                + ("请试听确认真实发声。" if has_config
+                                   else "请先选择本机原版语音配置，再试听。"))
                         elif packages:
-                            self.voice_note.set("检测到讲述人自然语音包，但 SAPI/WinRT "
-                                                "未开放云希/晓晓。已保留其它本地声音。")
+                            self.voice_note.set("系统有自然音色相关名称，但当前用户未枚举出可用安装位置。")
                         else:
-                            self.voice_note.set("当前未发现可通过公开接口调用的云希/晓晓。"
-                                                "点击“复制语音诊断”获取详情。")
+                            self.voice_note.set("未发现系统自然语音包；其它系统音色仍可使用。")
                     else:
                         self.voice_var.set("未找到可调用的本地语音")
                 elif kind == "tts_error":
@@ -501,7 +485,6 @@ class ReaderApp:
 
     def close(self):
         self.closed = True
-        self.scene_state = None
         self.speech.shutdown()
         self.cues.shutdown()
         if self.overlay is not None:
