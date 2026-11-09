@@ -232,6 +232,19 @@ jobs:
           if (($process.ExitCode -ne 0) -or (-not $report.StartsWith('PASS'))) {
             throw "Frozen UI/overlay test failed (exit=$($process.ExitCode))"
           }
+      - name: Exercise frozen picker three times in real Windows Tk
+        shell: pwsh
+        run: |
+          $testLog = Join-Path $env:TEMP 'GameTextReader_picker_selftest.txt'
+          Remove-Item $testLog -Force -ErrorAction SilentlyContinue
+          $exe = (Resolve-Path 'dist/GameTextReader/GameTextReader.exe').Path
+          $process = Start-Process -FilePath $exe -ArgumentList '--self-test-picker' -Wait -PassThru
+          if (-not (Test-Path $testLog)) { throw 'Frozen EXE did not generate picker smoke-test log' }
+          $report = Get-Content $testLog -Raw
+          Write-Output $report
+          if (($process.ExitCode -ne 0) -or (-not $report.StartsWith('PASS'))) {
+            throw "Frozen picker failed, exit=$($process.ExitCode)"
+          }
       - name: Launch full frozen V1.2 Tk application for startup verification
         shell: pwsh
         run: |
