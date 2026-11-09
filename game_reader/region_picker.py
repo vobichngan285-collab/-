@@ -1,8 +1,7 @@
-"""Darkened full-monitor rectangle picker, anchored to a central cursor crosshair.
+"""Darkened full-monitor picker anchored to the user's physical mouse position.
 
-The fixed crosshair represents the FUTURE game cursor position. The selected
-rectangle is saved in mouse-relative physical pixels; it is not permanently
-tied to the screen position where it was drawn.
+Drag in any direction. Selected offsets are retained for the cursor-following
+green guide, and releasing the mouse confirms the exact rectangle to OCR.
 """
 from __future__ import annotations
 
@@ -14,7 +13,7 @@ from .hover_modes import RelativeRegion, region_from_drag
 
 class ScreenRegionPicker(tk.Toplevel):
     def __init__(self, root: tk.Tk, monitor: tuple[int, int, int, int],
-                 initial: RelativeRegion, on_done, background=None):
+                 initial: RelativeRegion, on_done, background=None, anchor=None):
         super().__init__(root, bg="#10151d")
         self._done = on_done
         self._finished = False
@@ -24,7 +23,10 @@ class ScreenRegionPicker(tk.Toplevel):
         left, top, right, bottom = monitor
         self._width = right - left
         self._height = bottom - top
-        self._anchor = (self._width // 2, self._height // 2)
+        self._anchor = ((self._width // 2, self._height // 2)
+                        if anchor is None else
+                        (max(0, min(self._width, int(anchor[0]))),
+                         max(0, min(self._height, int(anchor[1])))))
         self.overrideredirect(True)
         self.geometry(f"{self._width}x{self._height}{left:+d}{top:+d}")
         self.attributes("-topmost", True)
@@ -48,12 +50,12 @@ class ScreenRegionPicker(tk.Toplevel):
 
         self.canvas.create_text(
             self._width // 2, 28,
-            text="十字表示游戏中鼠标的位置｜按住鼠标左键拖动设置扫描范围的宽高｜Esc 取消",
+            text="十字是当前鼠标位置｜按住左键往任意方向拖动，松开立即识别｜Esc 取消",
             fill="white", font=("Microsoft YaHei UI", 13, "bold"),
             tags="hint")
         self.canvas.create_text(
             self._width // 2, 56,
-            text="本版只保存框选宽高，实际扫描始终以鼠标为中心，不保留选区偏移",
+            text="支持左上、右上、左下、右下任意方向；保存偏移并与绿色框对应",
             fill="#9fdefa", font=("Microsoft YaHei UI", 10), tags="hint")
 
         ax, ay = self._anchor
@@ -63,7 +65,7 @@ class ScreenRegionPicker(tk.Toplevel):
                                 fill="#fbfbfb", width=2, tags="anchor")
         self.canvas.create_oval(ax - 3, ay - 3, ax + 3, ay + 3,
                                 outline="#50d5ff", width=2, tags="anchor")
-        self.canvas.create_text(ax + 10, ay + 28, text="鼠标扫描中心",
+        self.canvas.create_text(ax + 10, ay + 28, text="按快捷键时的鼠标位置",
                                 fill="#fbfbfb", anchor="nw", tags="anchor")
         self._draw_rectangle(ax + initial.x, ay + initial.y,
                              ax + initial.x + initial.width,
