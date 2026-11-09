@@ -151,3 +151,18 @@
 - 交付 ZIP `GameTextReader_V1.5_Windows_x64_Portable.zip`；GitHub Actions Artifact [13630307332](https://github.com/vobichngan285-collab/-/actions/runs/42513309243/artifacts/13630307332)；194,303,280字节；SHA256 `0260fd7001c34cf5efcc7f7e129c8b5258f92c9bbf0288e5cdeca3a9c9c8060f`；本地CRC通过，独立文件中验证存在 EXE+三套官方 PP-OCRv6 模型，绝不包含供应商 grtts DLL 与保益代码。
 - 真实用户尚待验证：广荣x64 DLL在安装了保益但独立运行的系统能否加载；输出默认永德或讯飞声音，是否实际出声；原版基础发行不包含按需下载安装的微软 NeuralVoices **云希/晓晓**，需后续合法独立安装或兼容验证，不可冒称已实现。若失败请复制「链路日志」和「语音诊断」，区分 `WinError1114`、语音列表为空、PCM生成失败与播放失败。
 - OCR V1.4 第二模式慢、左上/左下角漏字尚在修复列表，**本次只是单独语音实验**；留待后续在同图A/B实测后处理。保留所有旧版历史；Android 仓库没动。
+
+
+## V1.6 · 2026-11-09 · 广荣独立语音宿主专项修复／不宣称官方 DLL 已可用
+
+用户明确要求不要重复发 OCR 照片或语音诊断，集中修复广荣微软 TTS；第二档 OCR 十几秒及结果不完整已知，本轮**完全不修改 OCR 模型参数与业务逻辑**。
+
+- 从 main V1.5 `1ac65ba95d25236f58675a4f2b481644f68b4d2f` 新建 `game-text-reader-v16-guangrong-dll-fix-20261109` 分支，保留 V1.4/V1.5 全历史。
+- 复验沈广荣 1.1.0 原始发行包双架构：`grtts.dll` 是 x86（PE machine 0x14c），`grtts_x64.dll` 是 x64（0x8664）。原包 SHA256 和安全路径规则依旧在 `game_reader/guangrong_setup.py` 校验。
+- 原来通过 PyInstaller 的 Python 子进程调用 `ctypes` 加载外部引擎，冻结程序出现错误/超时；多轮 CI 追踪确定能进入原生 LoadLibraryExW 调用，却不能完成返回；这不是完整解决。
+- 最终改用单独编译的 Windows x64 C++ 程序 `native/guangrong_host.cpp` → `GuangrongHost.exe`，与主程序通过匿名本地管道交互，支持语音枚举、切换、合成 PCM、停止、速率/音量。主程序 `game_reader/guangrong_tts.py` 不再原位加载第三方 DLL；保益悦听/NVDA 通道完全不参与。
+- Windows CI 用 **CI-only 模拟 DLL** 回归：`HELLO 1`、语音枚举“Native Host Test Voice”、合成9600字节/24000Hz/16bit/单声道 PCM，代码路径贯通；打包冻结 EXE→本地宿主→模拟 DLL→PCM 也通过。这仅证明自研 IPC 和 PCM 链路实现，不证明广荣真实音库能运行。
+- Windows CI [42556569339](https://github.com/vobichngan285-collab/-/actions/runs/42556569339) `success`，22项单元测试通过，EXE+Windows语音辅助宿主+原有离线OCR模型、UIA和绿色边框冒烟测试通过。免安装包 Artifact [13647478200](https://github.com/vobichngan285-collab/-/actions/runs/42556569339/artifacts/13647478200)，artifact报告字节数194022294（该数值是GitHub artifact，并非内部ZIP字节数），有效期至2026-12-09。没有验证可发布 sandbox 路径，不编造文件哈希。
+- **严谨重要限制：** 额外下载并验证原版发行包，使用自研独立 `GuangrongHost.exe` 实际加载原版 `grtts_x64.dll`，Windows干净CI仍返回 `ERROR 1114`，没有 `READY` 或合成数据；[原版实测 Actions 42561840959](https://github.com/vobichngan285-collab/-/actions/runs/42561840959)。这项 workflow 的整体 success 指的是“完成了真实测试并正确识别未初始化”，**不是广荣已可用**。
+- 真机测试建议：旧V1.5完全退出，V1.6解压到单独文件夹；它读取与V1.5相同的 `%LOCALAPPDATA%\GameTextReader\GuangrongIndependent` 官方安装组件，不必重新下载；先“重新扫描语音”，查看是否出现广荣音色，如有再点击“试听”。如果官方 DLL 仍报1114，不需要反复发送旧 OCR 照片，后续应走已知可独立运行的合规中文神经TTS方案或获取广荣宿主适配方案，而不是盲打包。
+- 保留原单次F8清脆叮提示音，无鼠标区域音效；OCR Small/Medium 性能与边角漏字问题未改，后续单独处理。未触碰 Android kanzi-assistant 仓库。
