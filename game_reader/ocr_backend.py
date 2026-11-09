@@ -62,7 +62,7 @@ class LocalOCR:
     switch replaces it; one lock keeps prewarm and recognition from racing.
     """
     def __init__(self, medium_rec_batch_num: int = 2,
-                 medium_ort_threads: int | None = None):
+                 medium_ort_threads: int | None = 2):
         # Only Medium REC batching is experimental. Small retains RapidOCR
         # defaults for a stable baseline and rapid F8 response.
         if not 1 <= medium_rec_batch_num <= 6:
