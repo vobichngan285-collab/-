@@ -712,10 +712,15 @@ class ReaderApp:
         if self.setting_hotkey:
             self.finish_hotkey()
         try:
+            anchor = get_cursor()
             monitor = monitor_rect_at_cursor()
         except Exception as exc:
             self.status("无法获取显示器尺寸：" + type(exc).__name__)
             return
+        self._picker_anchor = anchor
+        self._picker_monitor = monitor
+        self._picker_snapshot = None
+        self._picker_foreground = foreground_window_id()
         self._choosing_region = True
         if getattr(self, "scan_frame", None) is not None:
             self.scan_frame.hide()
@@ -748,16 +753,24 @@ class ReaderApp:
                 background = ImageGrab.grab(bbox=monitor, all_screens=True)
             except Exception:
                 pass  # Fall back to a semi-transparent overlay if capture fails.
+            self._picker_snapshot = background
             self._region_picker = ScreenRegionPicker(
                 self.root, monitor,
-                centered_region(RelativeRegion.from_settings(self.settings["region"])),
-                self._region_picked, background=background)
+                RelativeRegion.from_settings(self.settings["region"]),
+                self._region_picked, background=background,
+                anchor=(self._picker_anchor[0] - monitor[0],
+                        self._picker_anchor[1] - monitor[1]))
             self._region_picker.lift()
         except Exception as exc:
             self._region_picked(None)
             self.status("暗屏框选初始化失败：" + type(exc).__name__)
 
     def _region_picked(self, region: RelativeRegion | None):
+        snapshot = getattr(self, "_picker_snapshot", None)
+        monitor = getattr(self, "_picker_monitor", None)
+        anchor = getattr(self, "_picker_anchor", None)
+        focus = getattr(self, "_picker_foreground", None)
+        self._picker_snapshot = None  # Raw screenshot lives in RAM only.
         self._region_picker = None
         self._choosing_region = False
         if self.closed:
@@ -773,13 +786,54 @@ class ReaderApp:
         if region is None:
             self.status("框选已取消，原识别区域未改变。")
         else:
-            self.settings["region"] = centered_region(region).as_list()
-            self.region_info_var.set(self.format_region(centered_region(region)))
+            self.settings["region"] = region.as_list()  # All four drag directions.
+            self.region_info_var.set(self.format_region(region))
             self._hover_last_text = ""
             self._hover_spoken_cursor = None
             self.persist()
-            self.status("已保存扫描宽高；识别始终以鼠标为中心。F11 可重新框选。")
+            if anchor is not None and monitor is not None:
+                self._start_selected_ocr(region, anchor, monitor, snapshot, focus)
         self._hover_next_due = time.monotonic() + self.settings["period_ms"] / 1000.0
+
+    def _start_selected_ocr(self, region: RelativeRegion, anchor, monitor,
+                            snapshot, focus):
+        """Recognize exactly the selected pixels as soon as the button is released.
+
+        Reuse the original undimmed screenshot. No extra 250ms UI delay,
+        no second screenshot and no model change.
+        """
+        try:
+            box = capture_box(region, anchor, monitor)
+        except ValueError as exc:
+            self.status("框选区域无效：" + str(exc))
+            return
+        self.invalidate("框选已确认，正在识别文字…")
+        request_id = self.capture_id
+        self.busy = True
+        self.read_btn.configure(state="disabled")
+
+        def work():
+            started = time.monotonic()
+            try:
+                if snapshot is not None:
+                    ml, mt = monitor[:2]
+                    image = snapshot.crop((box[0]-ml, box[1]-mt,
+                                           box[2]-ml, box[3]-mt))
+                else:
+                    image = ImageGrab.grab(bbox=box, all_screens=True)
+                capture_ms = round((time.monotonic() - started) * 1000)
+                if image.size != (box[2]-box[0], box[3]-box[1]):
+                    raise RuntimeError("框选截图尺寸与实际识别区域不一致")
+                with self._ocr_lock:
+                    lines = self.ocr_worker.recognize(image, box[:2], "small")
+                infer_ms = round((time.monotonic() - started) * 1000) - capture_ms
+                self.events.put(("ocr_ok", request_id, lines,
+                                 round((time.monotonic() - started) * 1000),
+                                 focus, "selection", (capture_ms, infer_ms)))
+            except Exception:
+                self.events.put(("ocr_fail", request_id, traceback.format_exc()))
+        threading.Thread(target=work, daemon=True,
+                         name="DragSelectionSmallOCR").start()
 
     def toggle_mouse_mode(self):
         # Startup already defaults to V1.2 pointer mode. Every press MUST
