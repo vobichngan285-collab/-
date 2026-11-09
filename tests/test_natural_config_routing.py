@@ -75,9 +75,10 @@ def test_speech_worker_places_config_and_voice_in_one_queue_command():
                  config_path=r"H:\语音 配置\config.json")
     kind, payload = worker._commands.get_nowait()
     assert kind == "latest_natural_speak"
-    assert payload[0] == "你好"
-    assert payload[1].endswith("Yunxi.1")
-    assert payload[2] == r"H:\语音 配置\config.json"
+    assert payload[0][0] == "你好"
+    assert payload[0][1].endswith("Yunxi.1")
+    assert payload[0][2] == r"H:\语音 配置\config.json"
+    assert payload[1] == 1
     worker.speak("普通朗读")
     assert worker._commands.get_nowait() == ("latest_speak", ("普通朗读", 2))
 
