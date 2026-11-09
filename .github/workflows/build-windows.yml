@@ -1,4 +1,4 @@
-name: Build portable Windows game text reader V1.5
+name: Build portable Windows game text reader V1.6
 on:
   workflow_dispatch:
   push:
@@ -115,7 +115,7 @@ jobs:
           if (($process.ExitCode -ne 0) -or (-not $report.StartsWith('PASS'))) {
             throw "Frozen UI/overlay test failed (exit=$($process.ExitCode))"
           }
-      - name: Launch full frozen V1.5 Tk application for startup verification
+      - name: Launch full frozen V1.6 Tk application for startup verification
         shell: pwsh
         run: |
           $testLog = Join-Path $env:TEMP 'GameTextReader_app_selftest.txt'
@@ -126,7 +126,7 @@ jobs:
           $report = Get-Content $testLog -Raw
           Write-Output $report
           if (($process.ExitCode -ne 0) -or (-not $report.StartsWith('PASS'))) {
-            throw "Full V1.5 application startup failed (exit=$($process.ExitCode))"
+            throw "Full V1.6 application startup failed (exit=$($process.ExitCode))"
           }
       - name: Validate third-party Guangrong fallback has no bundled DLL
         shell: pwsh
@@ -147,12 +147,12 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory release -Force | Out-Null
-          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_V1.5_Windows_x64_Portable.zip -CompressionLevel Optimal -Force
-          $size = (Get-Item release/GameTextReader_V1.5_Windows_x64_Portable.zip).Length
+          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_V1.6_Windows_x64_Portable.zip -CompressionLevel Optimal -Force
+          $size = (Get-Item release/GameTextReader_V1.6_Windows_x64_Portable.zip).Length
           Write-Output "Portable archive size: $size bytes"
       - uses: actions/upload-artifact@v4
         with:
-          name: GameTextReader-V1.5-Portable
-          path: release/GameTextReader_V1.5_Windows_x64_Portable.zip
+          name: GameTextReader-V1.6-Portable
+          path: release/GameTextReader_V1.6_Windows_x64_Portable.zip
           if-no-files-found: error
           retention-days: 30
