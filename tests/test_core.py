@@ -255,3 +255,19 @@ def test_independent_guangrong_setup_rejects_unverified_binary(tmp_path, monkeyp
     with pytest.raises(ValueError, match="校验"):
         setup.install_official_guangrong()
     assert not (tmp_path / "untrusted").exists()
+
+
+def test_win_native_guangrong_loader_rejects_unusable_x64_binary(tmp_path):
+    """Never report success or PyInstaller's misleading missing-file message."""
+    import sys
+    if sys.platform != "win32":
+        return
+    from game_reader.guangrong_tts import load_guangrong_native
+    file = tmp_path / "grtts_x64.dll"
+    file.write_bytes(b"not a PE DLL")
+    try:
+        load_guangrong_native(file)
+    except RuntimeError as exc:
+        assert "WinError 193" in str(exc), str(exc)
+    else:
+        raise AssertionError("Invalid vendor DLL must be rejected by native loader")
