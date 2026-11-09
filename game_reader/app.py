@@ -31,9 +31,10 @@ from .hover_modes import (MOUSE_SIDE_VKS, DEFAULT_REGION, RelativeRegion,
                           HOTKEY_FIELDS, HOTKEY_LABELS, hotkey_label,
                           valid_hotkey, sanitize_hotkeys, parse_period_ms,
                           capture_box, normalized_text, next_mouse_mode,
-                          cursor_still_near_capture, exclude_unrelated_desktop_text)
+                          cursor_still_near_capture)
 from .region_picker import ScreenRegionPicker
 from .foreground import foreground_class, foreground_window_id
+from .hover_target import centered_region, nearest_readable_text
 
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "GameTextReader"
 CONFIG_PATH = CONFIG_DIR / "settings.json"
@@ -62,7 +63,8 @@ def read_settings() -> dict:
         settings["period_ms"] = parse_period_ms(settings["period_ms"])
     except ValueError:
         settings["period_ms"] = 500
-    settings["region"] = RelativeRegion.from_settings(settings["region"]).as_list()
+    settings["region"] = centered_region(
+        RelativeRegion.from_settings(settings["region"])).as_list()
     settings["tier"] = "small"
     settings["dwell_ms"] = 0
     return settings
@@ -197,8 +199,8 @@ class ReaderApp:
             value=self.format_region(RelativeRegion.from_settings(self.settings["region"])))
         ttk.Label(modes, textvariable=self.region_info_var,
                   wraplength=680).pack(anchor="w", pady=(4, 0))
-        ttk.Label(modes, text="悬停模式仅做周期局部 OCR；同一段文字只朗读一次。"
-                  "手动局部识别可重新朗读相同文字。").pack(anchor="w")
+        ttk.Label(modes, text="以鼠标为中心扫描，只读最近的文字；附近没有文字就保持安静。"
+                  "鼠标离开后停止旧朗读；F11 框选只决定扫描宽高。").pack(anchor="w")
 
         models = ttk.LabelFrame(p, text="离线 OCR 模型", padding=8)
         models.pack(fill="x", pady=3)
@@ -298,7 +300,7 @@ class ReaderApp:
                 (self.local_key_button, "设置键盘或鼠标侧键手动局部 OCR"),
                 (self.pick_key_button, "设置全局暗屏框选快捷键"),
                 (self.period_entry, "局部 OCR 自动刷新毫秒间隔"),
-                (self.pick_region_button, "暗屏框选鼠标跟随 OCR 区域"),
+                (self.pick_region_button, "暗屏框选鼠标居中 OCR 的宽度和高度"),
                 (self.voice_select, "选择本地 TTS 声音"),
                 (self.import_luna_button, "选择原版语音配置文件"),
                 (self.rate_slider, "语速"),
@@ -403,8 +405,8 @@ class ReaderApp:
 
     @staticmethod
     def format_region(region: RelativeRegion) -> str:
-        return (f"识别区域 {region.width} × {region.height} 像素，"
-                f"相对鼠标偏移 ({region.x}, {region.y})；可重新框选。")
+        return (f"鼠标居中扫描：{region.width} × {region.height} 像素；"
+                "F11 或设置按钮可调整扫描范围大小。")
 
     def save_period(self):
         try:
@@ -465,7 +467,7 @@ class ReaderApp:
                 pass  # Fall back to a semi-transparent overlay if capture fails.
             self._region_picker = ScreenRegionPicker(
                 self.root, monitor,
-                RelativeRegion.from_settings(self.settings["region"]),
+                centered_region(RelativeRegion.from_settings(self.settings["region"])),
                 self._region_picked, background=background)
             self._region_picker.lift()
         except Exception as exc:
@@ -488,12 +490,12 @@ class ReaderApp:
         if region is None:
             self.status("框选已取消，原识别区域未改变。")
         else:
-            self.settings["region"] = region.as_list()
-            self.region_info_var.set(self.format_region(region))
+            self.settings["region"] = centered_region(region).as_list()
+            self.region_info_var.set(self.format_region(centered_region(region)))
             self._hover_last_text = ""
             self._hover_spoken_cursor = None
             self.persist()
-            self.status("已保存鼠标跟随区域；按 F11 或自定义键可以随时重新框选。")
+            self.status("已保存扫描宽高；识别始终以鼠标为中心。F11 可重新框选。")
         self._hover_next_due = time.monotonic() + self.settings["period_ms"] / 1000.0
 
     def toggle_mouse_mode(self):
@@ -631,13 +633,11 @@ class ReaderApp:
         try:
             cursor = get_cursor()
             captured_window = foreground_class()
-            if exclude_unrelated_desktop_text(captured_window):
-                if manual:
-                    self.status("当前在 Windows 桌面／任务栏；悬停 OCR 不朗读桌面图标。")
-                self._hover_next_due = time.monotonic() + self.settings["period_ms"] / 1000.0
-                return False
             monitor = monitor_rect_at_cursor()
-            relative = RelativeRegion.from_settings(self.settings["region"])
+            # A previous F11 selection may have been off-centre; the new
+            # experiment ignores its offset and only preserves width/height.
+            relative = centered_region(
+                RelativeRegion.from_settings(self.settings["region"]))
             box = capture_box(relative, cursor, monitor)
         except Exception as exc:
             self.status("局部 OCR 截图区域错误：" + type(exc).__name__)
@@ -681,18 +681,26 @@ class ReaderApp:
                 # location before OCR finishes. A new frame can catch up.
                 self._hover_last_text = ""
                 return
-        regions = build_reading_regions(lines)
-        text = "\n".join(region.text for region in regions).strip()
+        # Unlike the previous experiment, NEVER concatenate everything in
+        # the crop (that read "7 Days to Die" while pointing at "DLSS").
+        # The OCR detector already returns physical screen coordinates.
+        if capture_cursor is None:
+            # Do not guess a stale pointer position.
+            return
+        target = nearest_readable_text(lines, capture_cursor)
+        text = target.text.strip() if target is not None else ""
         normalized = normalized_text(text)
         changed = normalized != self._hover_last_text
         if changed:
             self._hover_last_text = normalized
         if not normalized:
-            if changed:
+            if changed or self._hover_spoken_cursor is not None:
                 self.speech.stop()
+                self._hover_spoken_cursor = None
+                self._hover_spoken_foreground = None
                 self.update_output("")
             if manual:
-                self.status("局部 OCR 没有识别到文字；可调整框选范围。")
+                self.status("鼠标附近没有文字；不会朗读扫描范围内的远处文字。")
             return
         if changed or manual:
             self.speech.stop()
@@ -700,9 +708,9 @@ class ReaderApp:
             self._hover_spoken_cursor = capture_cursor
             self._hover_spoken_foreground = capture_foreground
             self.speak_selected(text[:1900])
-            self.status(f"局部 OCR 已识别 {len(regions)} 个朗读区域，"
-                        f"耗时 {elapsed} 毫秒；"
-                        + ("手动识别。" if manual else "检测到新文字，已朗读。"))
+            self.status(f"鼠标附近文字已识别：距离 {target.distance_px:.0f} 像素，"
+                        f"OCR {elapsed} 毫秒；"
+                        + ("手动识别。" if manual else "已朗读。"))
 
     def invalidate(self, reason: str):
         """Actually erase all text, coordinates, hover state and audio."""
