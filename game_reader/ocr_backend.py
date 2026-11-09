@@ -86,7 +86,7 @@ class LocalOCR:
     def prepare(self, tier: str, still_current=None) -> int | None:
         """Warm only while the operation is current; never block F8 with stale work."""
         if tier != "small":
-            raise ValueError("Unsupported OCR tier")
+            raise ValueError("V1.8 supports PP-OCRv6 Small only")
         started = time.perf_counter()
         if still_current is not None and not still_current():
             return None
