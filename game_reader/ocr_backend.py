@@ -1,4 +1,4 @@
-"""Lightweight offline ONNX Runtime driver for official PP-OCRv6 Small/Medium.
+"""Lightweight offline ONNX Runtime driver for official PP-OCRv6 Small only.
 
 Uses RapidOCR (PP-OCRv6 detection + recognition), without PaddlePaddle/PaddleX.
 Only explicit, bundled file paths are allowed. No runtime model downloads.
@@ -10,10 +10,7 @@ from pathlib import Path
 import numpy as np
 from .core import OCRLine
 
-TIERS = {
-    tier: (f"PP-OCRv6_det_{tier}.onnx", f"PP-OCRv6_rec_{tier}.onnx")
-    for tier in ("small", "medium")
-}
+TIERS = {"small": ("PP-OCRv6_det_small.onnx", "PP-OCRv6_rec_small.onnx")}
 
 
 def model_root() -> Path:
@@ -66,8 +63,8 @@ class LocalOCR:
                 "Rec.engine_type": EngineType.ONNXRUNTIME,
                 "Det.ocr_version": OCRVersion.PPOCRV6,
                 "Rec.ocr_version": OCRVersion.PPOCRV6,
-                "Det.model_type": (ModelType.SMALL if tier == "small" else ModelType.MEDIUM),
-                "Rec.model_type": (ModelType.SMALL if tier == "small" else ModelType.MEDIUM),
+                "Det.model_type": ModelType.SMALL,
+                "Rec.model_type": ModelType.SMALL,
                 "Det.model_path": str(det),
                 "Rec.model_path": str(rec),
             })
