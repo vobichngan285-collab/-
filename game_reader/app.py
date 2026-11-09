@@ -346,7 +346,7 @@ class ReaderApp:
         self.persist()
         self.status(f"截图热键已设置：{event.keysym}")
 
-     def install_guangrong(self):
+    def install_guangrong(self):
         """Only explicit click starts a one-time download; never block Tk."""
         self.grtts_button.configure(state="disabled")
         self.status("正在从广荣作者官方发行页获取独立运行组件...")
