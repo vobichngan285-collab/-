@@ -130,6 +130,8 @@ def packaged_picker_selftest() -> int:
         app._region_previous_root_state = "normal"
         app._hover_last_text = ""
         app._hover_spoken_cursor = None
+        app.mode_generation = 0
+        app.speech = SimpleNamespace(stop=lambda: None)
         app.settings = {"region": [-300, -140, 600, 400], "period_ms": 500}
         app.region_info_var = tk.StringVar(master=root, value="old")
         app.persist = lambda: None
