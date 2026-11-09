@@ -47,6 +47,8 @@ def main() -> None:
     for threads in (None, 1, 2, 4):
         key = "auto" if threads is None else str(threads)
         trials[key] = measure(threads, images)
+    # Re-test automatic threading LAST to detect warmup/order bias.
+    trials["auto_recheck"] = measure(None, images)
     comparisons = {}
     for threads in (1, 2, 4):
         details = {}
@@ -66,7 +68,21 @@ def main() -> None:
                                candidate["signature"]["count"],
             }
         comparisons[str(threads)] = details
+    order_check = {}
+    for name in images:
+        first = trials["auto"]["scenes"][name]["median_inference_ms"]
+        final_auto = trials["auto_recheck"]["scenes"][name]["median_inference_ms"]
+        fixed_two = trials["2"]["scenes"][name]["median_inference_ms"]
+        order_check[name] = {
+            "first_auto_ms": first,
+            "final_auto_ms": final_auto,
+            "fixed2_ms": fixed_two,
+            "speedup_vs_final_auto": round(final_auto / max(fixed_two, 1), 3),
+            "text_equal": (trials["auto_recheck"]["scenes"][name]["signature"]["text_sha256"]
+                           == trials["2"]["scenes"][name]["signature"]["text_sha256"]),
+        }
     report = {
+        "order_check": order_check,
         "warning": "Windows GitHub CI synthetic images; user computer not yet validated.",
         "medium_batch": 2,
         "auto": "RapidOCR 3.10.0 default ONNX Runtime CPU threads",
@@ -76,6 +92,7 @@ def main() -> None:
     file = Path("medium_ocr_threads_ab.json")
     file.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print("MEDIUM_THREAD_AB_REPORT=" + str(file.resolve()))
+    print("AUTO_RECHECK=" + json.dumps(order_check, ensure_ascii=False))
     for k, scenes in comparisons.items():
         for name, s in scenes.items():
             print(f"threads={k} {name}: auto={s['baseline_ms']}ms "
