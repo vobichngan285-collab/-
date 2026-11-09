@@ -33,7 +33,7 @@ from .hover_modes import (MOUSE_SIDE_VKS, DEFAULT_REGION, RelativeRegion,
                           capture_box, normalized_text, next_mouse_mode,
                           cursor_still_near_capture, exclude_unrelated_desktop_text)
 from .region_picker import ScreenRegionPicker
-from .foreground import foreground_class
+from .foreground import foreground_class, foreground_window_id
 
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "GameTextReader"
 CONFIG_PATH = CONFIG_DIR / "settings.json"
@@ -91,6 +91,7 @@ class ReaderApp:
             self.settings["luna_config"] = str(app_dir / "config..json")
         self.events: Queue[tuple] = Queue()
         self.lines: list[OCRLine] = []
+        self._full_capture_window = None
         self.ocr_worker = LocalOCR()
         self.busy = False
         self.closed = False
@@ -699,6 +700,7 @@ class ReaderApp:
         self.capture_id += 1
         self.expires_at = None
         self.lines = []
+        self._full_capture_window = None
         self.last_target = None
         self._hover_spoken_cursor = None
         self._hover_spoken_foreground = None
@@ -734,11 +736,13 @@ class ReaderApp:
             started = time.monotonic()
             phase = "截图"
             try:
+                focus = foreground_window_id()
                 image, origin = grab_current_monitor()
                 phase = f"离线OCR推理（{tier}）"
                 lines = self.ocr_worker.recognize(image, origin, tier)
                 self.events.put(("ocr_ok", capture_id, lines,
-                                 round((time.monotonic() - started) * 1000)))
+                                 round((time.monotonic() - started) * 1000),
+                                 focus))
             except Exception as exc:
                 self.events.put(("ocr_fail", capture_id,
                                  "phase: " + phase + "\n" +
@@ -751,12 +755,13 @@ class ReaderApp:
                 event = self.events.get_nowait()
                 kind = event[0]
                 if kind == "ocr_ok":
-                    _, capture_id, lines, milliseconds = event
+                    _, capture_id, lines, milliseconds, focus = event
                     self.busy = False
                     self.read_btn.configure(state="normal")
                     if capture_id != self.capture_id:
                         continue
                     self.lines = build_reading_regions(lines)
+                    self._full_capture_window = focus
                     self.hover.reset()
                     self.last_target = None
                     self.update_output("\n".join(region.text for region in self.lines))
@@ -873,19 +878,24 @@ class ReaderApp:
             if self._choosing_region or self.setting_hotkey:
                 pass
             elif self.mouse_mode == "pointer" and not self.busy and self.lines:
-                x, y = get_cursor()
-                target = hit_test(self.lines, x, y)
-                if target != self.last_target:
-                    if self.overlay is not None:
-                        self.overlay.show(target)
-                    if self.last_target is not None:
-                        # Also cancel A -> B, not only A -> blank.
-                        self.speech.stop()
-                    self.last_target = target
-                to_read = self.hover.update(target, time.monotonic() * 1000)
-                if to_read is not None:
-                    self.cues.play("hover")
-                    self.speak_selected(to_read.text)
+                # No scene-change detector. Simply discard a screenshot when
+                # the user has switched to another actual Windows window.
+                if (self._full_capture_window and
+                        foreground_window_id() != self._full_capture_window):
+                    self.invalidate("检测到窗口切换，旧 OCR 坐标已清除；按全屏键重新截图。")
+                else:
+                    x, y = get_cursor()
+                    target = hit_test(self.lines, x, y)
+                    if target != self.last_target:
+                        if self.overlay is not None:
+                            self.overlay.show(target)
+                        if self.last_target is not None:
+                            self.speech.stop()
+                        self.last_target = target
+                    to_read = self.hover.update(target, time.monotonic() * 1000)
+                    if to_read is not None:
+                        self.cues.play("hover")
+                        self.speak_selected(to_read.text)
             elif self.mouse_mode == "hover":
                 if self._hover_spoken_cursor is not None:
                     moved = not cursor_still_near_capture(
