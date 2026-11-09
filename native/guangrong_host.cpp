@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <condition_variable>
 #include <cstring>
+#include <cstdio>
 #include <iostream>
 #include <mutex>
 #include <string>
@@ -21,6 +22,17 @@
 #pragma comment(lib, "Crypt32.lib")
 
 namespace {
+void debug_stage(const char* label) {
+    wchar_t destination[4096]={};
+    DWORD length=GetEnvironmentVariableW(L"GR_NATIVE_DEBUG_FILE",destination,4096);
+    if (length==0 || length>=4096) return;
+    FILE* fp=nullptr;
+    if (_wfopen_s(&fp,destination,L"ab")==0 && fp) {
+        fwrite(label,1,strlen(label),fp);
+        fwrite("\\n",1,1,fp);
+        fclose(fp);
+    }
+}
 std::mutex output_mutex;
 void send_line(const std::string& s) {
     std::lock_guard<std::mutex> g(output_mutex);
@@ -93,10 +105,14 @@ struct Engine {
     bool start(const std::wstring& dll) {
         // The parent EXE is frozen and may have changed its DLL search path;
         // the native helper must not inherit that third-party path.
+        debug_stage("native-before-reset-dlldir");
         SetDllDirectoryW(nullptr);
+        debug_stage("native-after-reset-dlldir");
+        debug_stage("native-before-load-library-ex");
         module = LoadLibraryExW(dll.c_str(), nullptr,
                                LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR |
                                LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+        debug_stage("native-after-load-library-ex");
         if (!module) {
             send_line("ERROR\t" + std::to_string(GetLastError()) +
                       "\tWindows DLL loader rejected the publisher engine");
@@ -138,16 +154,21 @@ struct Request { uint64_t generation; std::wstring text; };
 }
 
 int wmain(int argc, wchar_t** argv) {
+    debug_stage("native-wmain-entry");
     _setmode(_fileno(stdin),_O_BINARY);
+    debug_stage("native-before-setmode");
     _setmode(_fileno(stdout),_O_BINARY);
+    debug_stage("native-before-sync-io");
     std::ios::sync_with_stdio(false);
     std::cin.tie(nullptr);
     if (argc!=3 || std::wstring(argv[1])!=L"--server") {
         send_line("ERROR\t2\tUsage: GuangrongHost.exe --server <grtts_x64.dll>");
         return 2;
     }
+    debug_stage("native-before-engine");
     Engine engine;
     if (!engine.start(argv[2])) return 3;
+    debug_stage("native-after-engine");
 
     std::atomic<uint64_t> generation{0};
     std::mutex queue_mutex;
