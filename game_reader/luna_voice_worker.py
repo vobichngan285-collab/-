@@ -9,7 +9,8 @@ import base64
 import json
 import sys
 
-from .ms_voice_discovery import discover_natural_voices, choose_natural_voice, load_user_config
+from .ms_voice_discovery import (discover_natural_voices, choose_natural_voice,
+                                 load_user_config, inspect_local_voice_config)
 from .luna_natural_voice import make_ssml
 from .upstream_luna_pipe import OriginalLunaPipe, runtime_directory
 
@@ -29,9 +30,13 @@ def synthesize_with_installed_voice(config_path: str, voice_id: str, text: str, 
     selected = choose_natural_voice(voice_id, found)
     if selected is None:
         raise VoiceSetupError("selected_voice_package_not_installed")
+    config_code = inspect_local_voice_config(config_path)
+    if config_code != "ok":
+        raise VoiceSetupError(config_code)
     license_text, _ = load_user_config(config_path)
     if not license_text:
-        raise VoiceSetupError("local_voice_license_missing")
+        # An externally edited file can change between preflight and load.
+        raise VoiceSetupError("local_voice_config_changed_during_read")
     # Stage check is separated from native startup so failures are attributable.
     try:
         runtime_directory()
@@ -43,6 +48,10 @@ def synthesize_with_installed_voice(config_path: str, voice_id: str, text: str, 
 
 
 def process_request(request: dict, synthesize=synthesize_with_installed_voice) -> dict:
+    if isinstance(request, dict) and request.get("command") == "check_config":
+        status = inspect_local_voice_config(request.get("config_path", ""))
+        # Presence-only test: no license, local paths or JSON text in response.
+        return {"ok": status == "ok", "stage": "config_read", "code": status}
     if not isinstance(request, dict) or request.get("command") != "speak":
         return {"ok": False, "stage": "request", "code": "unsupported_request"}
     content, config_path, voice_id = (request.get(k) for k in ("text", "config_path", "voice_id"))
