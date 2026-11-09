@@ -21,10 +21,10 @@ jobs:
           $csc = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
           if (-not (Test-Path $csc)) { throw 'Windows Framework compiler unavailable' }
           New-Item -ItemType Directory out -Force | Out-Null
-          & $csc /nologo /target:winexe /platform:x64 /optimize+ /r:System.Windows.Forms.dll /r:System.Drawing.dll /out:out/BaoYiVoiceInspector.exe diagnostics/BaoYiVoiceInspector.cs
+          & $csc /nologo /target:winexe /platform:x64 /optimize+ /r:System.Windows.Forms.dll /r:System.Drawing.dll /out:out\BaoYiVoiceInspector.exe .\diagnostics\BaoYiVoiceInspector.cs
           if ($LASTEXITCODE -ne 0) { throw "Inspector compile failed: $LASTEXITCODE" }
           if (-not (Test-Path 'out/BaoYiVoiceInspector.exe')) { throw 'Inspector EXE missing' }
-          & $csc /nologo /target:exe /platform:x64 /out:"$env:RUNNER_TEMP/BoyPcReader_TestDummy.exe" diagnostics/ProbeHost.cs
+          & $csc /nologo /target:exe /platform:x64 /out:"$env:RUNNER_TEMP\BoyPcReader_TestDummy.exe" .\diagnostics\ProbeHost.cs
           if ($LASTEXITCODE -ne 0) { throw 'Simulated process compile failed' }
       - name: Verify filters and sanitized user profile path
         shell: pwsh
