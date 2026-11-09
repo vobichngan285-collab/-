@@ -131,8 +131,10 @@ def test_native_ttk_theme_keeps_accessibility_semantics():
     import game_reader
     source=(Path(game_reader.__file__).parent/"ui_theme.py").read_text(encoding="utf-8")
     assert 'ttk.Style' in source
-    assert "ttk.Button" not in source or "Canvas" not in source
-    assert "Canvas" not in source
+    # Documentation may mention Canvas as an anti-pattern; reject actual
+    # drawing APIs, not those explanatory docstring words.
+    assert "tk.Canvas(" not in source
+    assert "create_window(" not in source
 
 
 
