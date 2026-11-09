@@ -11,13 +11,26 @@ import base64
 import json
 import sys
 
-from .luna_natural_voice import synthesize_exact_config
+from .luna_natural_voice import load_original_config, make_ssml
+from .upstream_luna_pipe import OriginalLunaPipe
+
+def synthesize_with_unmodified_luna(config_path: str, text: str, speed=0) -> bytes:
+    """Run unchanged official LunaSubprocess64.exe, NOT a rewritten SDK."""
+    selected = load_original_config(config_path)
+    from pathlib import Path
+    if not Path(selected.model_path).is_dir():
+        raise FileNotFoundError("原作者原配置指定的自然语音包在此电脑不存在")
+    with OriginalLunaPipe() as engine:
+        engine.start(selected.model_path, selected.license_text)
+        # SSML matches original LunaTranslator TTSbase.createSSML.
+        return engine.speak_ssml(make_ssml(text, int(speed)))
+
 
 MAX_TEXT = 2000
 MAX_AUDIO = 16 * 1024 * 1024
 
 
-def process_request(request: dict, synthesize=synthesize_exact_config) -> dict:
+def process_request(request: dict, synthesize=synthesize_with_unmodified_luna) -> dict:
     if not isinstance(request, dict) or request.get("command") != "speak":
         return {"ok": False, "error": "unsupported_request"}
     text = request.get("text")
@@ -31,7 +44,7 @@ def process_request(request: dict, synthesize=synthesize_exact_config) -> dict:
         if len(wav) > MAX_AUDIO:
             return {"ok": False, "error": "audio_too_large"}
         return {"ok": True, "wav": base64.b64encode(wav).decode("ascii"),
-                "audio_size": len(wav)}
+                "audio_size": len(wav), "engine": "official_luna_unmodified"}
     except FileNotFoundError:
         return {"ok": False, "error": "voice_package_unavailable"}
     except PermissionError:
