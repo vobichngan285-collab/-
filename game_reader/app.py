@@ -132,18 +132,54 @@ class ReaderApp:
     def create_widgets(self):
         p = ttk.Frame(self.root, padding=12)
         p.pack(fill="both", expand=True)
-        ttk.Label(p, text="游戏文字助手 · V1.2 Small OCR",
+        ttk.Label(p, text="游戏文字助手 · V1.2 Small + 双鼠标朗读模式",
                   font=("Microsoft YaHei UI", 16, "bold")).pack(anchor="w")
-        ttk.Label(p, text="按 F8 截图识别，鼠标进入文字区域立刻朗读；"
-                  "识别结果保留 60 秒。系统自然语音需先试听确认。",
-                  wraplength=570).pack(anchor="w", pady=(2, 8))
+        ttk.Label(p, text="F8 全屏 OCR，F9 切换鼠标指向／悬停识别，F10 手动局部 OCR。"
+                  "三个快捷键均可自定义单键，或两枚标准鼠标侧键。",
+                  wraplength=690).pack(anchor="w", pady=(2, 8))
         keys = ttk.LabelFrame(p, text="截图热键", padding=8)
         keys.pack(fill="x", pady=3)
         self.key_button = ttk.Button(keys, text=self.settings["hotkey_label"],
                                      command=self.capture_hotkey)
         self.key_button.pack(side="left")
-        ttk.Label(keys, text="按左侧按钮后直接按单键；Esc 取消。").pack(
+        ttk.Label(keys, text="键盘单键／鼠标侧键 1、2；Esc 取消。").pack(
             side="left", padx=10)
+
+        modes = ttk.LabelFrame(p, text="鼠标朗读与局部 OCR", padding=8)
+        modes.pack(fill="x", pady=3)
+        mode_row = ttk.Frame(modes)
+        mode_row.pack(fill="x")
+        ttk.Label(mode_row, text="模式切换键").pack(side="left")
+        self.mode_key_button = ttk.Button(
+            mode_row, text=self.settings["mode_hotkey_label"], width=18,
+            command=lambda: self.begin_hotkey("mode_vk"))
+        self.mode_key_button.pack(side="left", padx=(5, 18))
+        ttk.Label(mode_row, text="局部 OCR 手动键").pack(side="left")
+        self.local_key_button = ttk.Button(
+            mode_row, text=self.settings["local_hotkey_label"], width=18,
+            command=lambda: self.begin_hotkey("local_vk"))
+        self.local_key_button.pack(side="left", padx=5)
+        self.mouse_mode_var = tk.StringVar(value="当前：默认鼠标指向朗读（F9 切换）")
+        ttk.Label(modes, textvariable=self.mouse_mode_var,
+                  foreground="#245ca5").pack(anchor="w", pady=(4, 2))
+        options_row = ttk.Frame(modes)
+        options_row.pack(fill="x", pady=(3, 0))
+        ttk.Label(options_row, text="周期刷新（毫秒）").pack(side="left")
+        self.period_var = tk.StringVar(value=str(self.settings["period_ms"]))
+        self.period_entry = ttk.Entry(options_row, textvariable=self.period_var, width=9)
+        self.period_entry.pack(side="left", padx=(6, 4))
+        self.period_save_button = ttk.Button(
+            options_row, text="保存间隔", command=self.save_period)
+        self.period_save_button.pack(side="left", padx=(0, 12))
+        self.pick_region_button = ttk.Button(
+            options_row, text="暗屏十字框选区域", command=self.select_region)
+        self.pick_region_button.pack(side="left")
+        self.region_info_var = tk.StringVar(
+            value=self.format_region(RelativeRegion.from_settings(self.settings["region"])))
+        ttk.Label(modes, textvariable=self.region_info_var,
+                  wraplength=680).pack(anchor="w", pady=(4, 0))
+        ttk.Label(modes, text="悬停模式仅做周期局部 OCR；同一段文字只朗读一次。"
+                  "手动局部识别可重新朗读相同文字。").pack(anchor="w")
 
         models = ttk.LabelFrame(p, text="离线 OCR 模型", padding=8)
         models.pack(fill="x", pady=3)
@@ -238,7 +274,11 @@ class ReaderApp:
             import tk_uia
             result = tk_uia.enable(self.root)
             for widget, label in (
-                (self.key_button, "设置单键截图快捷键"),
+                (self.key_button, "设置键盘或鼠标侧键全屏截图快捷键"),
+                (self.mode_key_button, "设置键盘或鼠标侧键切换朗读模式"),
+                (self.local_key_button, "设置键盘或鼠标侧键手动局部 OCR"),
+                (self.period_entry, "局部 OCR 自动刷新毫秒间隔"),
+                (self.pick_region_button, "暗屏框选鼠标跟随 OCR 区域"),
                 (self.voice_select, "选择本地 TTS 声音"),
                 (self.import_luna_button, "选择原版语音配置文件"),
                 (self.rate_slider, "语速"),
