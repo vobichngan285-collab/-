@@ -166,3 +166,18 @@
 - **严谨重要限制：** 额外下载并验证原版发行包，使用自研独立 `GuangrongHost.exe` 实际加载原版 `grtts_x64.dll`，Windows干净CI仍返回 `ERROR 1114`，没有 `READY` 或合成数据；[原版实测 Actions 42561840959](https://github.com/vobichngan285-collab/-/actions/runs/42561840959)。这项 workflow 的整体 success 指的是“完成了真实测试并正确识别未初始化”，**不是广荣已可用**。
 - 真机测试建议：旧V1.5完全退出，V1.6解压到单独文件夹；它读取与V1.5相同的 `%LOCALAPPDATA%\GameTextReader\GuangrongIndependent` 官方安装组件，不必重新下载；先“重新扫描语音”，查看是否出现广荣音色，如有再点击“试听”。如果官方 DLL 仍报1114，不需要反复发送旧 OCR 照片，后续应走已知可独立运行的合规中文神经TTS方案或获取广荣宿主适配方案，而不是盲打包。
 - 保留原单次F8清脆叮提示音，无鼠标区域音效；OCR Small/Medium 性能与边角漏字问题未改，后续单独处理。未触碰 Android kanzi-assistant 仓库。
+
+
+## V1.6 · 2026-11-09 · 独立广荣原生宿主实验与未解决的官方 DLL 1114
+
+**授权范围**：用户在看到 V1.5 现场截图中「PyInstallerImportError: Failed to load ...grtts_x64.dll」后，要求本次只修广荣微软 TTS，不再索要 Medium OCR 日志或语音诊断；明确 Medium 按 F8 等十几秒才出部分结果。V1.6 不应把 Medium 已修好写入交付。
+
+**代码改动（分支 `game-text-reader-v16-guangrong-dll-fix-20261109`）**：
+1. 创建 `native/guangrong_host.cpp`：独立编译的 Windows x64 本地语音辅助程序 `GuangrongHost.exe`，支持加载用户独立安装的原版 `grtts_x64.dll`、检查函数和音色、PCM 合成、匿名管道回传；有速率、音量、停播接口。语音子进程和保益悦听的读屏通道相互独立。不修改第三方 DLL、不内置官方声库或密钥。
+2. 整体更换 `game_reader/guangrong_tts.py`，旧 PyInstaller 多进程内 `ctypes.CDLL` 加载路径被替换为 `subprocess.Popen` 调用真实原生 EXE；负责音色列表与 PCM 解析、播放和失败诊断，保留 SAPI/WinRT 备用。对外置 DLL 采用 Win32 原生加载器并明确上报 1114、193、126 等错误。
+3. 修复 PyInstaller 运行环境继承 Windows DLL 搜索路径造成的原生 EXE 依赖冲突；C++ 宿主使用静态 MSVC CRT。保留游戏核心 F8、绿色框、自动 60 秒过期、用户无障碍读屏，不恢复后台画面监测、不动 Medium OCR 和 Small OCR。
+4. 添加 CI 专用模拟 `native/fake_grtts.cpp` 和 `tools/test_grtts_host.py`（不随发布包分发）及冻结 EXE 级 `--self-test-guangrong-loader`：独立 C++ 引擎模拟音色列表 1 个、合成 24kHz 单声道 16位 PCM 共 9600字节，冻结 EXE 收到回传音频，并检查错误 PE 加载的真实 WinError 193。
+5. 最终 Windows CI [42556569339](https://github.com/vobichngan285-collab/-/actions/runs/42556569339) **success**，22 项单元测试、模型实测、UIA/绿色框、冻结 GUI 启动和模拟原生语音 PCM 流程通过。Artifact [13647478200](https://github.com/vobichngan285-collab/-/actions/runs/42556569339/artifacts/13647478200)，名为 `GameTextReader-V1.6-Portable`，GitHub 报告 194022294 字节；内层目标文件名 `GameTextReader_V1.6_Windows_x64_Portable.zip`。当前工作容器无法做本地 ZIP 字节校验，不能声称本地 CRC 或 SHA256 已确认。
+6. **最重要的负面结果**：独立取原版广荣 1.1.0 `grtts.nvda-addon`，验证已知 SHA256 `14ba0d4155549a1e4b76335687c960815c87e16f3e34907e1476d206c3609a77`；在干净 Windows 2025 CI 里，新的独立 C++ 原生宿主尝试加载真正的 64 位 `grtts_x64.dll`，仍报 `ERROR 1114 Windows DLL loader rejected the publisher engine`，未成功枚举真实语音、未得到真实 PCM。详见 [42561840959](https://github.com/vobichngan285-collab/-/actions/runs/42561840959)。与前一版 PyInstallerImportError 不同，这次证明真实原始 DLL 在该环境也不独立初始化。**不得宣称真实广荣微软语音已修复或模拟 DLL 证明实声可用**。
+7. 下步只可针对真实独立 DLL 的原宿主依赖环境或选择不依赖读屏的独立离线 TTS 路线；别继续凭构建通过发「已修好」声明。用户 PC 实况可能不同，但目前只能作为兼容性实验包。其他历史全部保留；安卓仓库未改。
+
