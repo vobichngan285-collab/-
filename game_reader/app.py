@@ -643,6 +643,8 @@ class ReaderApp:
             self.status("无法获取显示器尺寸：" + type(exc).__name__)
             return
         self._choosing_region = True
+        if self.scan_frame is not None:
+            self.scan_frame.hide()
         # Cancel old queued OCR/audio before putting the selection overlay
         # on screen. Any image already being processed must be discarded.
         self.mode_generation += 1
@@ -718,19 +720,29 @@ class ReaderApp:
         self.speech.stop()
         if self.overlay is not None:
             self.overlay.hide()
+        if self.scan_frame is not None:
+            self.scan_frame.hide()
+        # Announcements are sent unfiltered, through the already-selected
+        # voice. Reserve enough time before OCR can interrupt the short cue.
+        announce = bool(self.settings.get("mode_voice_hint", True))
+        self._mode_announcement_until = (
+            time.monotonic() + 1.6 if announce else 0.0)
         if self.mouse_mode == "hover":
-            self.mouse_mode_var.set("当前：鼠标悬停局部 OCR（周期 + 手动触发）")
-            self._hover_next_due = time.monotonic() + 0.35
+            self.mouse_mode_var.set("当前：鼠标模式（局部 OCR）")
+            self._hover_next_due = max(
+                time.monotonic() + 0.35, self._mode_announcement_until)
             if self.root.state() == "normal":
                 self.root.iconify()
-            self.status("已进入鼠标悬停 OCR 模式；识别区域会跟随鼠标。")
-            self.cues.play("complete")
+            self.status("已进入鼠标模式；局部扫描框跟随鼠标。")
+            if announce:
+                self.speak_selected("鼠标模式")
         else:
-            self.mouse_mode_var.set("当前：默认鼠标指向已识别文字朗读")
+            self.mouse_mode_var.set("当前：默认模式（全屏 OCR 文字指向朗读）")
             self._hover_next_due = float("inf")
             self.update_output("\n".join(line.text for line in self.lines))
-            self.status("已切换回原来的鼠标指向朗读模式。")
-            self.cues.play("hover")
+            self.status("已切换到默认模式。")
+            if announce:
+                self.speak_selected("默认模式")
 
     def import_luna_config(self):
         selected = filedialog.askopenfilename(
@@ -888,36 +900,33 @@ class ReaderApp:
                 # location before OCR finishes. A new frame can catch up.
                 self._hover_last_text = ""
                 return
-        # Unlike the previous experiment, NEVER concatenate everything in
-        # the crop (that read "7 Days to Die" while pointing at "DLSS").
-        # The OCR detector already returns physical screen coordinates.
-        if capture_cursor is None:
-            # Do not guess a stale pointer position.
-            return
-        target = nearest_readable_text(lines, capture_cursor)
-        text = target.text.strip() if target is not None else ""
-        normalized = normalized_text(text)
-        changed = normalized != self._hover_last_text
-        if changed:
-            self._hover_last_text = normalized
+        # The user wants the ORIGINAL V1.2 full-screen OCR reading logic,
+        # only on a smaller pointer-centred screenshot. Do not rank by mouse
+        # distance, do not guess which UI element is a game tooltip.
+        raw = "\n".join(region.text for region in build_reading_regions(lines)).strip()
+        speech_text = filter_speech_text(raw, self.settings)
+        normalized = normalized_text(speech_text)
+        repeated = is_repeat_speech(self._hover_last_text, normalized, self.settings)
         if not normalized:
-            if changed or self._hover_spoken_cursor is not None:
+            if self._hover_last_text or self._hover_spoken_cursor is not None:
                 self.speech.stop()
                 self._hover_spoken_cursor = None
                 self._hover_spoken_foreground = None
-                self.update_output("")
+            self._hover_last_text = ""
+            self.update_output(raw)
             if manual:
-                self.status("鼠标附近没有文字；不会朗读扫描范围内的远处文字。")
+                self.status("局部 OCR 没有可朗读文字；可在内容过滤中调整。")
             return
-        if changed or manual:
+        if not repeated or manual:
             self.speech.stop()
-            self.update_output(text)
+            self.update_output(raw)  # Accessible raw OCR stays untouched.
+            self._hover_last_text = normalized
             self._hover_spoken_cursor = capture_cursor
             self._hover_spoken_foreground = capture_foreground
-            self.speak_selected(text[:1900])
-            self.status(f"鼠标附近文字已识别：距离 {target.distance_px:.0f} 像素，"
-                        f"OCR {elapsed} 毫秒；"
-                        + ("手动识别。" if manual else "已朗读。"))
+            self.speak_selected(speech_text[:1900])
+            self.status(f"局部 OCR 扫描 {len(lines)} 行，"
+                        f"{elapsed} 毫秒；"
+                        + ("手动重新朗读。" if manual else "新文字已朗读。"))
 
     def invalidate(self, reason: str):
         """Actually erase all text, coordinates, hover state and audio."""
@@ -1060,6 +1069,30 @@ class ReaderApp:
             pass
         self.root.after(40, self.poll_messages)
 
+    def update_scan_frame(self):
+        """Show the REAL cursor-centred capture rectangle, without stealing focus.
+
+        Four small native transparent border windows remain OUTSIDE the
+        captured pixels, so the green guide cannot contaminate OCR.
+        """
+        if self.scan_frame is None:
+            return
+        if (self._choosing_region or self.setting_hotkey
+                or self.root.state() == "normal"
+                or not self.settings.get("show_scan_frame", True)):
+            self.scan_frame.hide()
+            return
+        try:
+            cursor = get_cursor()
+            monitor = monitor_rect_at_cursor()
+            region = centered_region(
+                RelativeRegion.from_settings(self.settings["region"]))
+            left, top, right, bottom = capture_box(region, cursor, monitor)
+            self.scan_frame.show(
+                OCRLine("扫描框", left, top, right, bottom))
+        except Exception:
+            self.scan_frame.hide()
+
     def poll_input(self):
         if self.closed:
             return
@@ -1101,7 +1134,8 @@ class ReaderApp:
 
             if self._choosing_region or self.setting_hotkey:
                 pass
-            elif self.mouse_mode == "pointer" and not self.busy and self.lines:
+            elif (self.mouse_mode == "pointer" and not self.busy and self.lines
+                  and time.monotonic() >= self._mode_announcement_until):
                 # No scene-change detector. Simply discard a screenshot when
                 # the user has switched to another actual Windows window.
                 if (self._full_capture_window and
@@ -1119,8 +1153,11 @@ class ReaderApp:
                     to_read = self.hover.update(target, time.monotonic() * 1000)
                     if to_read is not None:
                         self.cues.play("hover")
-                        self.speak_selected(to_read.text)
+                        spoken = filter_speech_text(to_read.text, self.settings)
+                    if spoken:
+                        self.speak_selected(spoken)
             elif self.mouse_mode == "hover":
+                self.update_scan_frame()
                 if self._hover_spoken_cursor is not None:
                     moved = not cursor_still_near_capture(
                         self._hover_spoken_cursor, get_cursor())
@@ -1130,7 +1167,8 @@ class ReaderApp:
                         self.speech.stop()
                         self._hover_spoken_cursor = None
                         self._hover_last_text = ""
-                if not self.busy and time.monotonic() >= self._hover_next_due:
+                if (not self.busy and time.monotonic() >= self._hover_next_due
+                        and time.monotonic() >= self._mode_announcement_until):
                     self.start_hover_ocr(manual=False)
         except Exception as exc:
             self.status("鼠标／快捷键监听异常：" + str(exc))
@@ -1145,6 +1183,8 @@ class ReaderApp:
                 pass
         self.speech.shutdown()
         self.cues.shutdown()
+        if self.scan_frame is not None:
+            self.scan_frame.close()
         if self.overlay is not None:
             self.overlay.close()
         self.root.destroy()
