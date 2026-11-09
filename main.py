@@ -5,7 +5,7 @@ import sys
 
 
 def packaged_ocr_selftest() -> int:
-    """Run *the frozen executable* through both real OCR models, no Tk window."""
+    """Run the frozen EXE against the sole real Small OCR model."""
     import os
     import tempfile
     import traceback
@@ -24,7 +24,7 @@ def packaged_ocr_selftest() -> int:
         draw.text((75, 245), "SETTINGS", fill="black", font=font)
         engine = LocalOCR()
         report = []
-        for tier in ("small", "medium"):
+        for tier in ("small",):
             started = __import__("time").perf_counter()
             lines, diagnostics = engine.recognize_timed(im, (0, 0), tier)
             elapsed_ms = round((__import__("time").perf_counter() - started) * 1000)
@@ -34,6 +34,13 @@ def packaged_ocr_selftest() -> int:
             if not any("GAME" in line.text.upper() or "SETTINGS" in line.text.upper()
                        for line in lines):
                 raise RuntimeError(f"{tier}: recognizer returned no expected text")
+        # V1.8 must reject the removed tier even when old config files request it.
+        try:
+            engine.recognize_timed(im, (0, 0), "medium")
+        except ValueError:
+            report.append("Medium removed: PASS")
+        else:
+            raise RuntimeError("Removed Medium mode was accepted")
         # Second scene: Chinese text on a dark menu-like background.
         # Server 2025 may not install any CJK font; do not fabricate glyphs.
         font_candidates = [
@@ -49,7 +56,7 @@ def packaged_ocr_selftest() -> int:
             cn = ImageFont.truetype(installed_font, 92)
             dark_draw.text((100, 50), "继续游戏", fill=(250, 250, 245), font=cn)
             dark_draw.text((100, 260), "游戏设置", fill=(245, 235, 185), font=cn)
-            for tier in ("small", "medium"):
+            for tier in ("small",):
                 cn_lines, cn_timing = engine.recognize_timed(dark, (0, 0), tier)
                 report.append(f"{tier} Chinese dark: {len(cn_lines)} rows, "
                               f"timings={cn_timing}, text=" +
@@ -189,7 +196,9 @@ def packaged_app_selftest() -> int:
         app = ReaderApp(root)
         root.update_idletasks()
         if app.hover.dwell_ms != 0:
-            raise RuntimeError("V1.6 must never keep the old hover delay")
+            raise RuntimeError("V1.8 must never keep the old hover delay")
+        if app.settings["tier"] != "small" or hasattr(app, "medium_radio"):
+            raise RuntimeError("Medium UI/configuration must be removed in V1.8")
         if app.overlay is None:
             raise RuntimeError("Native green outline initialization failed: " +
                                app.overlay_error)
@@ -198,7 +207,7 @@ def packaged_app_selftest() -> int:
                                app.accessibility_status)
         app.close()
         root = None
-        log.write_text("PASS\nFull V1.6 window, accessibility and frame ready", encoding="utf-8")
+        log.write_text("PASS\nFull V1.8 Small-only window, accessibility and frame ready", encoding="utf-8")
         return 0
     except BaseException:
         log.write_text("FAIL\n" + traceback.format_exc(), encoding="utf-8")
