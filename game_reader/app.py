@@ -102,6 +102,7 @@ class ReaderApp:
         self._hotkey_previous = {k: is_key_down(self.settings[k]) for k in HOTKEY_FIELDS}
         self._side_previous = {vk: is_key_down(vk) for vk in MOUSE_SIDE_VKS}
         self.mouse_mode = "pointer"
+        self._mode_key_first_press = True
         self.mode_generation = 0
         self.hover_ocr_busy = False
         self._hover_last_text = ""
@@ -160,7 +161,7 @@ class ReaderApp:
             command=lambda: self.begin_hotkey("local_vk"))
         self.local_key_button.pack(side="left", padx=5)
         self.mouse_mode_var = tk.StringVar(
-            value=f'当前：默认鼠标指向朗读（{self.settings["mode_hotkey_label"]} 切换）')
+            value=f'当前：默认鼠标指向朗读（{self.settings["mode_hotkey_label"]} 首次确认默认模式）')
         ttk.Label(modes, textvariable=self.mouse_mode_var,
                   foreground="#245ca5").pack(anchor="w", pady=(4, 2))
         options_row = ttk.Frame(modes)
@@ -441,7 +442,14 @@ class ReaderApp:
         self._hover_next_due = time.monotonic() + self.settings["period_ms"] / 1000.0
 
     def toggle_mouse_mode(self):
-        self.mouse_mode = next_mouse_mode(self.mouse_mode)
+        # The user's requested sequence is: first press confirms the normal
+        # pointer-reading mode, second press enables hover OCR, then alternate.
+        # Pointer mode also remains usable at startup for V1.2 compatibility.
+        if self._mode_key_first_press:
+            self.mouse_mode = "pointer"
+            self._mode_key_first_press = False
+        else:
+            self.mouse_mode = next_mouse_mode(self.mouse_mode)
         self.mode_generation += 1
         self._hover_last_text = ""
         self.hover.reset()
