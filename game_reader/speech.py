@@ -4,6 +4,7 @@ from queue import Queue, Empty
 from threading import Thread
 import sys
 from .winrt_speech import WinRTSpeechWorker, enumerate_winrt_voices
+from .luna_bridge import LunaNaturalBridge
 
 
 def enumerate_sapi_voices() -> list[tuple[str, str]]:
@@ -33,6 +34,8 @@ class SpeechWorker:
         self._commands = Queue()
         self._on_error = on_error
         self._winrt = None  # create WinRT media player only if WinRT voice is selected
+        self._luna_natural = None
+        self._luna_config_path = ""
         self._rate = 0
         self._volume = 100
         self._mode = "sapi"
@@ -55,17 +58,36 @@ class SpeechWorker:
                     voice.Speak("", 3)
                     if self._winrt is not None:
                         self._winrt.send("exit")
+                    if self._luna_natural is not None:
+                        self._luna_natural.close()
                     break
                 try:
                     if command == "stop":
                         voice.Speak("", 3)
                         if self._winrt is not None:
                             self._winrt.send("stop")
+                        if self._luna_natural is not None:
+                            self._luna_natural.stop()
+                    elif command == "luna_config":
+                        self._luna_config_path = str(arg or "")
+                        if self._luna_natural is not None:
+                            self._luna_natural.close()
+                            self._luna_natural = None
                     elif command == "voice" and arg:
                         voice.Speak("", 3)
                         if self._winrt is not None:
                             self._winrt.send("stop")
-                        if arg.startswith("winrt:"):
+                        if self._luna_natural is not None:
+                            self._luna_natural.stop()
+                        if arg.startswith("natural:"):
+                            self._mode = "natural"
+                            if self._luna_natural is not None:
+                                self._luna_natural.close()
+                            self._luna_natural = LunaNaturalBridge(
+                                self._luna_config_path, arg, on_error=self._on_error)
+                            self._luna_natural.set_rate(self._rate)
+                            self._luna_natural.set_volume(self._volume)
+                        elif arg.startswith("winrt:"):
                             self._mode = "winrt"
                             if self._winrt is None:
                                 self._winrt = WinRTSpeechWorker(on_error=self._on_error)
@@ -85,13 +107,21 @@ class SpeechWorker:
                         self._rate = int(arg)
                         if self._winrt is not None:
                             self._winrt.send("rate", arg)
+                        if self._luna_natural is not None:
+                            self._luna_natural.set_rate(int(arg))
                     elif command == "volume" and arg is not None:
                         voice.Volume = max(0, min(100, int(arg)))
                         self._volume = int(arg)
                         if self._winrt is not None:
                             self._winrt.send("volume", arg)
+                        if self._luna_natural is not None:
+                            self._luna_natural.set_volume(self._volume)
                     elif command == "speak" and arg:
-                        if self._mode == "winrt":
+                        if self._mode == "natural":
+                            if self._luna_natural is None:
+                                raise RuntimeError("尚未初始化系统自然语音")
+                            self._luna_natural.speak(str(arg))
+                        elif self._mode == "winrt":
                             if self._winrt is not None:
                                 self._winrt.send("speak", arg)
                         else:
@@ -114,6 +144,9 @@ class SpeechWorker:
 
     def set_voice(self, voice_id: str):
         self._commands.put(("voice", voice_id))
+
+    def set_luna_config(self, config_path: str):
+        self._commands.put(("luna_config", config_path))
 
     def set_rate(self, rate: int):
         self._commands.put(("rate", str(rate)))
