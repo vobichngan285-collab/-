@@ -101,6 +101,68 @@ def packaged_ui_selftest() -> int:
 
 
 
+def packaged_picker_selftest() -> int:
+    """Exercise the actual frozen Tk overlay three times, including cancellation.
+
+    Hosted source Python sometimes lacks Tcl auto.tcl, so it is important
+    this test runs with the very DLL/Tcl runtime shipped in the downloadable EXE.
+    """
+    import tempfile
+    import traceback
+    import time
+    import tkinter as tk
+    from pathlib import Path
+    from types import SimpleNamespace
+    from game_reader.app import ReaderApp
+
+    log = Path(tempfile.gettempdir()) / "GameTextReader_picker_selftest.txt"
+    root = None
+    try:
+        root = tk.Tk()
+        root.geometry("500x350")
+        root.update()
+        app = ReaderApp.__new__(ReaderApp)
+        app.root = root
+        app.closed = False
+        app.setting_hotkey = False
+        app._choosing_region = False
+        app._region_picker = None
+        app._region_previous_root_state = "normal"
+        app._hover_last_text = ""
+        app._hover_spoken_cursor = None
+        app.settings = {"region": [-300, -140, 600, 400], "period_ms": 500}
+        app.region_info_var = tk.StringVar(master=root, value="old")
+        app.persist = lambda: None
+        app.status = lambda text: None
+        for step in range(3):
+            app.select_region()
+            for _ in range(5):
+                time.sleep(0.02)
+                root.update()
+            picker = app._region_picker
+            if picker is None or not picker.winfo_exists() or not picker.winfo_viewable():
+                raise RuntimeError(f"Picker #{step+1} did not map/appear")
+            if step == 1:
+                picker._start_drag(SimpleNamespace(x=120, y=120))
+                picker._finish_drag(SimpleNamespace(x=490, y=350))
+            else:
+                picker.cancel()
+            root.update()
+            if app._choosing_region or app._region_picker is not None:
+                raise RuntimeError("Picker did not release active status for next attempt")
+            if abs(float(root.attributes("-alpha")) - 1.0) > 0.01:
+                raise RuntimeError("Main window opacity did not recover")
+        log.write_text("PASS\\nRepeated picker open/cancel/drag + state restoration",
+                       encoding="utf-8")
+        return 0
+    except BaseException:
+        log.write_text("FAIL\\n" + traceback.format_exc(), encoding="utf-8")
+        return 1
+    finally:
+        if root is not None:
+            root.destroy()
+
+
 def packaged_app_selftest() -> int:
     """Run the ACTUAL V1.2 UI construction without requiring a game."""
     import tempfile
@@ -146,6 +208,8 @@ if __name__ == "__main__":
         raise SystemExit(packaged_tts_selftest())
     if "--self-test-ui" in sys.argv:
         raise SystemExit(packaged_ui_selftest())
+    if "--self-test-picker" in sys.argv:
+        raise SystemExit(packaged_picker_selftest())
     if "--self-test-app" in sys.argv:
         raise SystemExit(packaged_app_selftest())
     from game_reader.app import run
