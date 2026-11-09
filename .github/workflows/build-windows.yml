@@ -1,8 +1,8 @@
-name: Build portable Windows game text reader V1.6
+name: Build portable Windows game text reader V1.7 Medium A/B
 on:
   workflow_dispatch:
   push:
-    branches: ['game-text-reader-*']
+    branches: ['game-text-reader-*', 'exp/windows-medium-latency-v17-20261109']
     paths:
       - 'game_reader/**'
       - 'native/**'
@@ -44,6 +44,20 @@ jobs:
         shell: pwsh
         run: |
           python prepare_models.py
+      - name: A/B Medium REC batches 6, 2, 4 on identical short and crowded game menus
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = (Get-Location).Path
+          python tools/benchmark_medium_batch.py
+          if ($LASTEXITCODE -ne 0) { throw 'Medium OCR A/B comparison failed' }
+          if (-not (Test-Path medium_ocr_ab.json)) { throw 'Medium OCR A/B evidence report missing' }
+      - name: Upload CPU OCR A/B measurements
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameTextReader-V1.7-Medium-CPU-AB
+          path: medium_ocr_ab.json
+          if-no-files-found: error
+          retention-days: 30
       - name: Inspect BOTH OCR tiers against English and synthetic Chinese menu (source)
         shell: pwsh
         run: |
@@ -132,7 +146,7 @@ jobs:
           if (($process.ExitCode -ne 0) -or (-not $report.StartsWith('PASS'))) {
             throw "Frozen UI/overlay test failed (exit=$($process.ExitCode))"
           }
-      - name: Launch full frozen V1.6 Tk application for startup verification
+      - name: Launch full frozen V1.7 Tk application for startup verification
         shell: pwsh
         run: |
           $testLog = Join-Path $env:TEMP 'GameTextReader_app_selftest.txt'
@@ -181,12 +195,12 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory release -Force | Out-Null
-          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_V1.6_Windows_x64_Portable.zip -CompressionLevel Optimal -Force
+          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_V1.7_Medium_AB_Windows_x64_Portable.zip -CompressionLevel Optimal -Force
           $size = (Get-Item release/GameTextReader_V1.6_Windows_x64_Portable.zip).Length
           Write-Output "Portable archive size: $size bytes"
       - uses: actions/upload-artifact@v4
         with:
-          name: GameTextReader-V1.6-Portable
+          name: GameTextReader-V1.7-Medium-AB-Portable
           path: release/GameTextReader_V1.6_Windows_x64_Portable.zip
           if-no-files-found: error
           retention-days: 30
