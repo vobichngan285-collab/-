@@ -310,3 +310,17 @@
 - **新下载包**：`GameTextReader-V12Base-NaturalVoice-ConfigRouteFix-Experimental`，GitHub Actions artifact id **13684269589**，下载页 https://github.com/vobichngan285-collab/-/actions/runs/42640318964/artifacts/13684269589；约 129,757,494 字节；截止 2026-12-09 的临时 artifact。下载是**公开无私人配置的包**；用户应另行在本机使用自己现有的原版 config.json，只选择本地文件，不上传密钥/内容。建议解压到独立目录，直接选已安装 Yunxi 试听；如果仍报错，截图错误代码即可。
 - **重要验收边界**：**尚未在用户 Windows 11 真机确认云希/晓晓发声。** CI 证明 Windows 路径编码与跨进程文件读取正常，无法代替真实 Windows 语音模型与微软 SDK 授权/合成验证。如果后续错误推进到 `embedded_sdk_rejected_synthesis`、native runtime、IPC 等阶段，按该新码针对性处理；不得宣称“一切语音已修好”。截图出现自然音色仍只是“已安装、待试听”。
 - **用户下一轮鼠标悬停 OCR、暗屏框选、独立模式切换等**仍只是待开发；本轮没有动这些功能。
+
+
+
+## 2026-11-09 · GameTextReader 下一版完整鼠标 OCR 实验包（Windows CI 通过，鼠标侧键/游戏弹窗待真机验收）
+
+- **用户授权**：明确“可以做实验包，把这些功能全部都加进去，写好代码之后逐行检查，没有逻辑漏洞就生成安装包”。实验使用**原仓库** `vobichngan285-collab/-`，从此前已构建且**用户实机确认云希/晓晓真正有声**的 `exp/v12-small-voice-config-route-fix-20261109` commit `e000570123a8a5ac591a2e28c958fe2ac66eb940` 新建独立分支 `exp/v12-small-hover-ocr-mouse-hotkeys-20261109`；保留 main、V1.2、V2.0 及原实验历史，不覆盖原代码。
+- **需求已实现**：默认快捷键 F8 仅重截屏、F9 只在两种鼠标模式间循环（按用户原顺序首次按 F9 确认默认指向朗读，第二次切到悬停 OCR，第三次默认，以后循环；开机默认指向模式也保持 V1.2 兼容）、F10 在悬停模式手动立即局部识别；三键可分别自定义为**单个键盘键或标准鼠标 XBUTTON1/2**，不能占用相同按键；不使用 Ctrl/Alt 组合。由于 Tk `<KeyPress>` 不会收到鼠标侧键，录制侧键用原 Windows `GetAsyncKeyState(0x05/0x06)` 20ms 轮询和按下沿去抖，执行阶段也按虚拟键码读取。若鼠标驱动将侧键映射为键盘宏则按驱动映射效果行事，不能承诺系统完全屏蔽游戏原本侧键行为。
+- **两套逻辑独立**：默认模式使用既有 F8 全屏 OCR 文字框和原点击即读/四边绿色框处理，保留 60 秒有效期；悬停模式按用户指定毫秒间隔（100～60000，输入保存，默认500ms）截图**鼠标周围局部区域**并使用同一个 V1.2 Small 检测器识别当前提示弹窗，不要求指针移动到文字框上。支持专用手动局部 OCR 键强制重新朗读。没有加入用户拒绝的画面变化识别逻辑；当 OCR 尚未完成，下一周期直接跳过不排队；F8 全屏请求至多留一个待处理，局部 OCR 与全屏 OCR 不并发访问同一引擎。归一化同文周期不重复朗读，新内容才触发语音；切换模式使用 generation 丢弃旧局部结果并停止旧朗读。
+- **暗屏框选**：新增设置按钮，隐藏主窗口、当前显示器半透明变暗、屏幕中央十字准星代表未来鼠标位置，左键拖出任意矩形、松开保存、Esc 取消；保存宽、高及相对中心准星偏移，游戏运行时通过实际鼠标物理坐标计算并随鼠标移动，靠显示器边缘平移/裁剪；支持负显示器坐标。框选时停用 OCR 防止识别软件遮罩。
+- **严格保护**：重新读取 Git tree，`core.py`、`win_screen.py`、`overlay.py`、`cues.py`、`ocr_backend.py` 与用户实机成功的上一基础分支 **blob SHA 完全一致**；`speech.py`、`luna_bridge.py`、`luna_voice_worker.py`、`ms_voice_discovery.py`、`luna_natural_voice.py`、`upstream_luna_pipe.py` **同样逐一 SHA 相同**，没有重动真正已经成功的自然语音链路。唯一 OCR 模型仍是 V1.2 默认 Small DET+REC，保持原始默认检测图像尺寸参数；Medium 和旧场景变化检测保持删除。新模块 `game_reader/hover_modes.py`、`game_reader/region_picker.py`，仅改 `game_reader/app.py` 和隔离实验工作流/测试。
+- **CI/自动化检查**：最终实验 commit **`b391d3a87b5e7284aacc0c379fbcca0f86a7d470`**，GitHub Actions **run `42649078052` completed/success**，**50 passed, 1 warning**；其中 Windows 实际 Tk 暗屏区域选择和取消、快捷键冲突和鼠标侧键边沿状态、F9 首次/第二次模式序列、剪裁坐标含多屏负坐标、毫秒非法值、纯 OCR 去重、旧任务丢弃、原 V1.2 Small OCR 配置回归均有测试。冻结 EXE 的 Small OCR、SAPI/WinRT 可导入与语音子进程 IPC / 中文路径自测、应用 UIA/启动、原版 Luna 模块 + GPL 许可来源及哈希、完整 ZIP 上传全部通过。唯一 warning 是未改动的上游适配器文档字符串转义提示（不影响构建）。
+- **下载**：公开无用户私有许可的 GitHub Actions artifact **13687659996**，名称 `GameTextReader-V12Base-MouseHover-SideHotkeys-Experimental`，浏览器下载链接 https://github.com/vobichngan285-collab/-/actions/runs/42649078052/artifacts/13687659996 ；GitHub 返回 artifact ZIP 大小 **129,776,746 bytes**，保留至 2026-12-09 UTC。内部为 `GameTextReader_V12Base_MouseHover_SideHotkeys_Experimental_x64.zip`，再解压可得 `GameTextReader/GameTextReader.exe` 与依赖。
+- **验收边界**：CI windows-2025 云端不能模拟用户电脑上真实游戏/真实鼠标侧键/独占全屏兼容，也不能证明新包云希及晓晓在用户 Windows11 依然确实发声；之前同一语音链路**由用户在上一实验包亲自证实能播放**，本次没有改代码。应让用户先单独解压，不覆盖已成功的语音版，确认快捷键、暗屏选区、不同游戏弹窗自动朗读，以及云希晓晓真机语音回归。若有异常需截图/诊断再精修，不要宣称全部硬件真机验收通过。
+- **隐私/许可证**：原始 `config.json` 只在用户自己的 Windows 电脑上，构建包与 GitHub 仓库不含私有 License；云端使用虚拟字符串，绝不能公开泄露用户文件。
