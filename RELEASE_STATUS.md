@@ -181,3 +181,20 @@
 6. **最重要的负面结果**：独立取原版广荣 1.1.0 `grtts.nvda-addon`，验证已知 SHA256 `14ba0d4155549a1e4b76335687c960815c87e16f3e34907e1476d206c3609a77`；在干净 Windows 2025 CI 里，新的独立 C++ 原生宿主尝试加载真正的 64 位 `grtts_x64.dll`，仍报 `ERROR 1114 Windows DLL loader rejected the publisher engine`，未成功枚举真实语音、未得到真实 PCM。详见 [42561840959](https://github.com/vobichngan285-collab/-/actions/runs/42561840959)。与前一版 PyInstallerImportError 不同，这次证明真实原始 DLL 在该环境也不独立初始化。**不得宣称真实广荣微软语音已修复或模拟 DLL 证明实声可用**。
 7. 下步只可针对真实独立 DLL 的原宿主依赖环境或选择不依赖读屏的独立离线 TTS 路线；别继续凭构建通过发「已修好」声明。用户 PC 实况可能不同，但目前只能作为兼容性实验包。其他历史全部保留；安卓仓库未改。
 
+
+
+## 2026-11-09 · 新实验：保益悦听实际语音组件只读调查工具
+
+**用户明确授权**：改变过去重复加载 NVDA 广荣 `grtts_x64.dll` 的路线，调查 Windows 保益悦听实际加载哪些语音驱动、TTS DLL、辅助进程与语音资源位置，以判断独立音色和独立语速的可行性。本轮要求现在开始实验；没有要求修改原有 OCR 或游戏文字助手朗读设置。
+
+**已完成**：
+- 基于 main `cb85f20b781cf529ab6247dfe210d92b78a93df5` 新建分支 `experiment-baoyi-real-tts-inspector-20261109`。
+- 编写独立 WinForms 64 位只读工具 `diagnostics/BaoYiVoiceInspector.cs`，编译为 `BaoYiVoiceInspector.exe`，不是替换已有游戏助手；具备适配读屏的无障碍按钮/报告文本区：「开始只读扫描」「复制调查报告」「另存报告 TXT」。
+- 只读列举保益候选进程、与保益相关的窗口 PID（**不记录标题文本**）、进程实际加载的 DLL 和有限的安装目录文件名，查找广荣 / NeuralVoice / SpeechSDK 等线索。可确认「文件在安装目录中」与「文件已被运行进程加载」的区别；**不能仅凭模块名称判断是哪一种声音**。
+- 扫描 Windows 卸载程序注册表的保益 DisplayName/InstallLocation/DisplayVersion **仅作读取**，不读取语音配置文件或 license 内容，不调用朗读接口，不注入 DLL，不更改保益和系统设置，不请求管理员权限；本地运行**完全不联网**、没有自动上传，报告只在用户点选复制或另存时离开内存。用户目录用 `%USERPROFILE%`、`%APPDATA%` 等替换，仍提示分享前人工检查目录信息。
+- 由于常见 Windows 浏览器标签或文件夹标题可能含「保益悦听」，已剔除浏览器/文件管理器误命中；输出模块访问受限的汇总数，并列出疑似音库子目录但不读取敏感内容。
+- 新增独立 GitHub Actions `.github/workflows/build-baoyi-inspector.yml` 以及 CI 仅用的 `diagnostics/ProbeHost.cs` 伪保益进程。**正式 Windows CI [42564529268](https://github.com/vobichngan285-collab/-/actions/runs/42564529268) success**：Windows 64 位 .NET 框架编译成功；自动测试进程/语音 DLL 名称筛选、用户路径脱敏、无障碍控件名称；运行无害模拟的 `BoyPcReader_TestDummy.exe`，实际进程枚举在报告中找到它；不含厂商 DLL。
+- 最终包 GitHub artifact [13650751784](https://github.com/vobichngan285-collab/-/actions/runs/42564529268/artifacts/13650751784)；在会话容器完整下载后解出内部 `BaoYiVoiceInspector_Windows_x64_ReadOnly.zip`，**13,374 字节，SHA256 `fa534fca19c0d6bf8bcd818f3e62291a580213e89ef7cd46720a284b7d54dcda`**，内外层 ZIP CRC 校验通过；内部恰有 `BaoYiVoiceInspector.exe`（22,016 字节，MZ 可执行标识）和 `README.txt`。
+- **尚未验证**：用户电脑上实际保益进程及广荣语音模块、声库路径和初始化方式。CI 上没有用户的保益悦听，也不可能据此宣称已找到实际内部语音驱动。此实验必须由用户在运行保益悦听的 Windows 电脑上打开小工具并点击「复制调查报告」，回传报告后才能判断。
+
+**使用**：打开电脑保益，维持平时的广荣音色并触发一次普通读屏朗读；新目录解压小工具，双击 `BaoYiVoiceInspector.exe` →「开始只读扫描」→「复制调查报告」→粘贴到对话。不要上传原音库、许可证或语音配置。调查工具没有依赖 BoyCtrl、不调用或打断保益语音、不会占用保益调速。正式 Windows GameTextReader V1.6、F8、绿色框、OCR 两档和音效没有修改；安卓仓库也没有修改。
