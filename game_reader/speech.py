@@ -36,6 +36,7 @@ class SpeechWorker:
         self._winrt = None  # create WinRT media player only if WinRT voice is selected
         self._luna_natural = None
         self._luna_config_path = ""
+        self._natural_voice_id = ""
         self._rate = 0
         self._volume = 100
         self._mode = "sapi"
@@ -81,6 +82,7 @@ class SpeechWorker:
                             self._luna_natural.stop()
                         if arg.startswith("natural:"):
                             self._mode = "natural"
+                            self._natural_voice_id = arg
                             if self._luna_natural is not None:
                                 self._luna_natural.close()
                             self._luna_natural = LunaNaturalBridge(
@@ -116,6 +118,27 @@ class SpeechWorker:
                             self._winrt.send("volume", arg)
                         if self._luna_natural is not None:
                             self._luna_natural.set_volume(self._volume)
+                    elif command == "natural_speak":
+                        # A single atomic queue entry carries the *current*
+                        # GUI selection and config path. It cannot race against
+                        # stale bridge state from earlier voice scans/imports.
+                        content, selected_id, selected_path = arg
+                        selected_path = str(selected_path or "")
+                        if not selected_id.startswith("natural:"):
+                            raise ValueError("自然语音音色 ID 无效")
+                        if (self._luna_natural is None or
+                                self._natural_voice_id != selected_id or
+                                self._luna_config_path != selected_path):
+                            if self._luna_natural is not None:
+                                self._luna_natural.close()
+                            self._luna_config_path = selected_path
+                            self._natural_voice_id = selected_id
+                            self._luna_natural = LunaNaturalBridge(
+                                selected_path, selected_id, on_error=self._on_error)
+                            self._luna_natural.set_rate(self._rate)
+                            self._luna_natural.set_volume(self._volume)
+                        self._mode = "natural"
+                        self._luna_natural.speak(str(content))
                     elif command == "speak" and arg:
                         if self._mode == "natural":
                             if self._luna_natural is None:
@@ -136,8 +159,12 @@ class SpeechWorker:
         finally:
             pythoncom.CoUninitialize()
 
-    def speak(self, text: str):
-        self._commands.put(("speak", text))
+    def speak(self, text: str, *, natural_voice_id: str = "",
+              config_path: str = ""):
+        if natural_voice_id:
+            self._commands.put(("natural_speak", (text, natural_voice_id, config_path)))
+        else:
+            self._commands.put(("speak", text))
 
     def stop(self):
         self._commands.put(("stop", None))
