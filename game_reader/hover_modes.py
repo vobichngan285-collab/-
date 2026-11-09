@@ -55,16 +55,16 @@ def sanitize_hotkeys(config: dict) -> dict:
             vk = int(config.get(field, fallback))
         except (TypeError, ValueError):
             vk = fallback
-        if not valid_hotkey(vk) or vk in reserved:
+        repaired = not valid_hotkey(vk) or vk in reserved
+        if repaired:
             vk = next(value for value in list(HOTKEY_DEFAULTS) + list(range(0x7A, 0x88))
                       if value not in reserved)
         config[field] = vk
-        if vk in MOUSE_SIDE_VKS:
-            config[label_field] = hotkey_label(vk)
-        elif not isinstance(config.get(label_field), str) or not config[label_field] or vk != int(config.get(field, vk)):
-            config[label_field] = hotkey_label(vk)
-        elif (config[label_field] in ("F8", "F9", "F10") and
-              vk != {"F8": 0x77, "F9": 0x78, "F10": 0x79}[config[label_field]]):
+        label = config.get(label_field)
+        if (repaired or vk in MOUSE_SIDE_VKS or
+                not isinstance(label, str) or not label or
+                (label in ("F8", "F9", "F10") and
+                 vk != {"F8": 0x77, "F9": 0x78, "F10": 0x79}[label])):
             config[label_field] = hotkey_label(vk)
         reserved.add(vk)
     return config
