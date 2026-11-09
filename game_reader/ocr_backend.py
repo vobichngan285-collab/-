@@ -61,7 +61,12 @@ class LocalOCR:
     Preload the selected tier in a background thread before the first F8. Model
     switch replaces it; one lock keeps prewarm and recognition from racing.
     """
-    def __init__(self):
+    def __init__(self, medium_rec_batch_num: int = 2):
+        # Only Medium REC batching is experimental. Small retains RapidOCR
+        # defaults for a stable baseline and rapid F8 response.
+        if not 1 <= medium_rec_batch_num <= 6:
+            raise ValueError("Medium REC batch size must be between 1 and 6")
+        self.medium_rec_batch_num = medium_rec_batch_num
         self.loaded_tier: str | None = None
         self.engine = None
         self._warmed = False
@@ -77,7 +82,7 @@ class LocalOCR:
         for path in (det, rec):
             if not path.is_file() or path.stat().st_size < 100000:
                 raise FileNotFoundError(f"缺少或损坏的离线 OCR 文件：{path}")
-        engine = RapidOCR(params={
+        params = {
             "Det.engine_type": EngineType.ONNXRUNTIME,
             "Rec.engine_type": EngineType.ONNXRUNTIME,
             "Det.ocr_version": OCRVersion.PPOCRV6,
@@ -91,16 +96,29 @@ class LocalOCR:
             "Rec.model_type": (ModelType.SMALL if tier == "small" else ModelType.MEDIUM),
             "Det.model_path": str(det),
             "Rec.model_path": str(rec),
-        })
+        }
+        if tier == "medium":
+            params["Rec.rec_batch_num"] = self.medium_rec_batch_num
+        engine = RapidOCR(params=params)
         self.engine = engine
         self.loaded_tier = tier
         self._warmed = False
 
-    def prepare(self, tier: str) -> int:
-        """Real inference required because RapidOCR 3.10 defers model loading."""
+    def prepare(self, tier: str, still_current=None) -> int | None:
+        """Warm selected tier only; abandon outdated queued warmup tasks.
+
+        Callback is checked before and after acquiring the OCR lock. A warmup
+        already running in ONNX cannot be interrupted safely.
+        """
         started = time.perf_counter()
+        if still_current is not None and not still_current():
+            return None
         with self._lock:
+            if still_current is not None and not still_current():
+                return None
             self._load(tier)
+            if still_current is not None and not still_current():
+                return None
             if not self._warmed:
                 # RapidOCR 3.10 lazily loads recognition ONLY when it sees
                 # real text. A blank frame would warm DET but not REC.
@@ -119,9 +137,12 @@ class LocalOCR:
     def recognize_timed(self, image, origin: tuple[int, int], tier: str):
         start = time.perf_counter()
         with self._lock:
-            # A startup prewarm in progress is a genuine wait and is included
-            # in the model stage. No second model initialization can overlap.
+            # Separate waiting behind background prewarm from model loading.
+            # Keep model_ms stable for the existing UI/log consumers.
+            model_lock_wait_ms = _milliseconds(start)
+            load_started = time.perf_counter()
             self._load(tier)
+            model_load_ms = _milliseconds(load_started)
             model_ms = _milliseconds(start)
             t0 = time.perf_counter()
             array = np.asarray(image if image.mode == "RGB" else image.convert("RGB"))
@@ -138,6 +159,9 @@ class LocalOCR:
         return lines, {
             "tier": tier,
             "model_ms": model_ms,
+            "model_lock_wait_ms": model_lock_wait_ms,
+            "model_load_ms": model_load_ms,
+            "rec_batch_num": self.medium_rec_batch_num if tier == "medium" else 6,
             "convert_ms": convert_ms,
             "inference_ms": inference_ms,
             "parse_ms": parse_ms,
