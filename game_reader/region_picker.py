@@ -7,13 +7,14 @@ tied to the screen position where it was drawn.
 from __future__ import annotations
 
 import tkinter as tk
+from PIL import ImageEnhance, ImageTk
 
 from .hover_modes import RelativeRegion, region_from_drag
 
 
 class ScreenRegionPicker(tk.Toplevel):
     def __init__(self, root: tk.Tk, monitor: tuple[int, int, int, int],
-                 initial: RelativeRegion, on_done):
+                 initial: RelativeRegion, on_done, background=None):
         super().__init__(root, bg="#10151d")
         self._done = on_done
         self._finished = False
@@ -27,11 +28,23 @@ class ScreenRegionPicker(tk.Toplevel):
         self.overrideredirect(True)
         self.geometry(f"{self._width}x{self._height}{left:+d}{top:+d}")
         self.attributes("-topmost", True)
-        self.attributes("-alpha", 0.52)
+        self.attributes("-alpha", 1.0 if background is not None else 0.52)
         self.canvas = tk.Canvas(
             self, width=self._width, height=self._height, bg="#111722",
             highlightthickness=0, cursor="crosshair")
         self.canvas.pack(fill="both", expand=True)
+        self._background_photo = None
+        if background is not None:
+            # Like a normal screenshot rectangle selector: darken the frozen
+            # captured monitor instead of relying on live alpha compositing
+            # over DirectX games. Keep the image in RAM only, never on disk.
+            background = background.convert("RGB")
+            if background.size != (self._width, self._height):
+                raise ValueError("框选背景与屏幕尺寸不一致")
+            dimmed = ImageEnhance.Brightness(background).enhance(0.36)
+            self._background_photo = ImageTk.PhotoImage(dimmed, master=self)
+            self.canvas.create_image(0, 0, image=self._background_photo,
+                                     anchor="nw", tags="background")
 
         self.canvas.create_text(
             self._width // 2, 28,
