@@ -1,0 +1,36 @@
+name: Luna original-config Microsoft Embedded SDK property verification
+on:
+  workflow_dispatch:
+  push:
+    branches: ['exp/luna-original-config-embedded-tts-20261109']
+    paths:
+      - tools/cloud_luna_sdk_real_property.py
+      - .github/workflows/cloud-luna-sdk-property.yml
+jobs:
+  property:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: 'x64'
+      - name: Install official embedded SDK
+        shell: pwsh
+        run: |
+          python -m pip install "azure-cognitiveservices-speech-embedded>=1.51.0"
+          if ($LASTEXITCODE -ne 0) { throw 'Embedded SDK install failed' }
+      - name: Test real model-key property with placeholder (no natural voice model)
+        shell: pwsh
+        run: |
+          python tools/cloud_luna_sdk_real_property.py
+          if ($LASTEXITCODE -ne 0) { throw 'Property probe script failed' }
+          if (-not (Test-Path luna_sdk_property_report.json)) { throw 'Report missing' }
+          Get-Content luna_sdk_property_report.json -Raw
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Luna-Real-Embedded-SDK-Property-Evidence
+          path: luna_sdk_property_report.json
+          retention-days: 30
+          if-no-files-found: error
