@@ -68,15 +68,18 @@ def test_selection_changed_after_rescan_is_used_by_next_speak(tmp_path):
 def test_speech_worker_places_config_and_voice_in_one_queue_command():
     worker = SpeechWorker.__new__(SpeechWorker)
     worker._commands = Queue()
+    from threading import Lock
+    worker._speech_lock = Lock()
+    worker._speech_generation = 0
     worker.speak("你好", natural_voice_id="natural:MicrosoftWindows.Voice.zh-CN.Yunxi.1",
                  config_path=r"H:\语音 配置\config.json")
     kind, payload = worker._commands.get_nowait()
-    assert kind == "natural_speak"
+    assert kind == "latest_natural_speak"
     assert payload[0] == "你好"
     assert payload[1].endswith("Yunxi.1")
     assert payload[2] == r"H:\语音 配置\config.json"
     worker.speak("普通朗读")
-    assert worker._commands.get_nowait() == ("speak", "普通朗读")
+    assert worker._commands.get_nowait() == ("latest_speak", ("普通朗读", 2))
 
 
 def test_safe_config_status_covers_main_failure_stages(tmp_path):
