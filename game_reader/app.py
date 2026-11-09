@@ -43,8 +43,9 @@ def read_settings() -> dict:
         settings["vk"] = int(settings["vk"])
         if not 1 <= settings["vk"] <= 254 or settings["vk"] in MODIFIER_KEYS:
             raise ValueError("Invalid hotkey")
-        if settings["tier"] not in ("small", "medium"):
-            settings["tier"] = "small"
+        # Existing V1.7 settings can still contain "medium", but V1.8 has
+        # only the Small model; always migrate the active tier at load time.
+        settings["tier"] = "small"
         # Never keep V1.1's 150ms delay, even from an existing settings file.
         settings["dwell_ms"] = 0
         return settings
@@ -62,7 +63,7 @@ def write_settings(settings: dict) -> None:
 class ReaderApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        root.title("游戏文字助手 V1.7 · Medium 速度实验")
+        root.title("游戏文字助手 V1.8 · Small OCR 与保益语音调查")
         root.geometry("690x720")
         root.minsize(610, 650)
         root.protocol("WM_DELETE_WINDOW", self.close)
@@ -120,7 +121,7 @@ class ReaderApp:
     def create_widgets(self):
         p = ttk.Frame(self.root, padding=12)
         p.pack(fill="both", expand=True)
-        ttk.Label(p, text="游戏文字助手 V1.7 · Medium 速度实验",
+        ttk.Label(p, text="游戏文字助手 V1.8 · Small OCR 与保益语音调查",
                   font=("Microsoft YaHei UI", 16, "bold")).pack(anchor="w")
         ttk.Label(p, text="按 F8 截图识别，鼠标进入文字区域立刻朗读；"
                   "按 F8 更新旧结果，识别结果最多保留 60 秒。",
@@ -133,17 +134,9 @@ class ReaderApp:
         ttk.Label(keys, text="按左侧按钮后直接按单键；Esc 取消。").pack(
             side="left", padx=10)
 
-        self.tier_var = tk.StringVar(value=self.settings["tier"])
-        models = ttk.LabelFrame(p, text="离线 OCR 模型", padding=8)
+        models = ttk.LabelFrame(p, text="离线 OCR 引擎", padding=8)
         models.pack(fill="x", pady=3)
-        self.small_radio = ttk.Radiobutton(models, text="PP-OCRv6 Small · 速度优先",
-                                           variable=self.tier_var, value="small",
-                                           command=self.change_model)
-        self.small_radio.pack(anchor="w")
-        self.medium_radio = ttk.Radiobutton(models, text="Medium 识别优先 · Small 定位 + Medium 识字（批2/CPU2实验）",
-                                            variable=self.tier_var, value="medium",
-                                            command=self.change_model)
-        self.medium_radio.pack(anchor="w")
+        ttk.Label(models, text="PP-OCRv6 Small（唯一引擎，保留快速识别）").pack(anchor="w")
 
         voice_frame = ttk.LabelFrame(p, text="独立本地朗读（广荣 TTS / Windows 语音）", padding=8)
         voice_frame.pack(fill="x", pady=3)
@@ -266,8 +259,7 @@ class ReaderApp:
         self.runtime_events = self.runtime_events[-70:]
 
     def prewarm_model(self, tier: str):
-        # Debounce rapid radio clicks and let a near-immediate F8 take priority.
-        # Earlier queued warmups must not reload an obsolete OCR tier.
+        # Let a near-immediate F8 take priority over warmup. Only Small exists.
         self._prewarm_serial += 1
         serial = self._prewarm_serial
 
@@ -290,13 +282,13 @@ class ReaderApp:
                                          f"{type(exc).__name__}: {exc}"))
             threading.Thread(target=work, name="ModelPreload", daemon=True).start()
 
-        # F8 immediately after a mode switch starts the required model only
-        # once, inside the capture path; it does not compete with old warmups.
+        # F8 immediately after launch initializes Small inside the capture path;
+        # it does not compete with queued background warmup.
         self.root.after(750, launch)
 
     def copy_runtime_log(self):
         info = [
-            "GameTextReader V1.7 | 仅数值与状态，不含截图和识别文字",
+            "GameTextReader V1.8 | 仅数值与状态，不含截图和识别文字",
             f"当前模型：{self.settings['tier']}",
             f"当前识别文字区域：{len(self.lines)}",
             f"广荣独立组件已准备：{bool(installed_x64_dll())}",
@@ -354,13 +346,7 @@ class ReaderApp:
         self.persist()
         self.status(f"截图热键已设置：{event.keysym}")
 
-    def change_model(self):
-        self.settings["tier"] = self.tier_var.get()
-        self.trace("切换 OCR 模式为 " + self.settings["tier"])
-        self.persist()
-        self.prewarm_model(self.settings["tier"])
-
-    def install_guangrong(self):
+     def install_guangrong(self):
         """Only explicit click starts a one-time download; never block Tk."""
         self.grtts_button.configure(state="disabled")
         self.status("正在从广荣作者官方发行页获取独立运行组件...")
