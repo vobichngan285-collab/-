@@ -297,3 +297,16 @@
 - **值得注意的界面与 worker 状态不一致**：用户截图上方提示近似“已发现 3 个系统自然语音包，请试听确认真实发声”；在本版 `game_reader/app.py` 中，只有 GUI 线程检查 `has_config=True` 才显示“请试听确认真实发声”，否则提示“请先选择本机原版语音配置，再试听”。因此**不能武断认为用户没选配置/原文件缺字段**；更可能是 GUI 与独立语音工作进程的配置路径/初始化状态不同步，或文件在子进程内不可读取。`ms_voice_discovery.py` GUI 和 worker 都使用同一个 `load_user_config` 函数，需重点查完整配置路径在 `app`→`SpeechWorker.set_luna_config`→`LunaNaturalBridge.config_path`→JSON stdin→`luna_voice_worker` 之间是否变成空/过期，以及选择配置后的重建时序。
 - **最小无需重下包的排查**：让用户通过当前版本按钮“选择本机原版语音配置”选择原始 `config..json`，等待扫描完成再点试听；不需要上传/展示任何私有许可证文本。若相同错误继续出现，应修复程序内部主/子进程配置状态传递并提升非敏感诊断，不要重复要求用户导入或盲目换引擎。
 - **状态**：扫描包发现已在用户本机成功；自然语音**尚未合成成功/尚未发声**；此前“构建成功”绝不代表通过实际声音验收。本条仅记录 bug，没有修改现有实验版代码、没有重新构建。
+
+
+## 2026-11-09 · V1.2 Small 自然语音配置链修复：发现 Windows 中文路径编码问题，构建通过（真机发声待验）
+
+- **本轮用户授权**：“开始”，针对其 Windows 11 截图中的“检测到 3 个微软自然语音包且能选 Yunxi，试听却报 `stage=discovery_or_setup; code=local_voice_license_missing`”修复。用户已多次选择本机原版 `config.json`，不再要求反复扫描或反复提供私人配置。
+- **已找到更具体且可自动复现的错误**：旧版本主 GUI 自检能看到本机配置中的 `MicrosoftWindows.Voice.License` 字段，但独立语音子进程报告缺失。新增 Windows 冻结 EXE 回归测试：生成*虚构测试值*的 JSON 配置，路径含中文与空格，通过 UTF-8 的子进程输入发送给 PyInstaller 打包的 `--luna-worker`；修复前 worker 错误报告 `local_voice_config_file_missing`（测试文件实际存在），表明中文路径在主进程→子进程传递中变形。确认旧 `luna_voice_worker.py` 使用 `sys.stdin.readline()`，Windows worker 默认文本代码页可能是 cp1252；而 `luna_bridge.py` 发出的是 UTF-8。**本轮改为 `sys.stdin.buffer.readline(...).decode('utf-8-sig')`，修复后的真实冻结 EXE 中文路径探针通过。** 上述是配置读取链修复，不证明模型授权有效/合成成功。
+- **双保险：消除旧状态不一致**：`ReaderApp.speak_selected()` 在每次“试听”或“鼠标指向朗读”时从当前 GUI 实际选中音色以及最新 `settings['luna_config']` 取值，作为同一个 `natural_speak` 队列消息传给 `SpeechWorker`；worker 按需重建语音桥，避免先前扫描/导入产生的旧路径缓存。此更新不影响 SAPI/WinRT 普通朗读路径。
+- **细分且脱敏错误**：`inspect_local_voice_config()` 分类配置未选择、路径文件不存在、无法读取、JSON损坏、Voice.License 字段缺失、字段存在。worker 支持 `check_config` 自检命令，只回传 `stage/code`，绝不回传原始许可证内容、完整配置路径；许可证不放 GitHub，不嵌入包。前台导入时的配置检查同步使用新分类。
+- **原仓库独立实验分支**：`exp/v12-small-voice-config-route-fix-20261109`，基于之前已构建实验分支 `exp/v12-small-system-voice-discovery-20261109`（原先 V1.2 Small OCR 底子），**最终 HEAD `e000570123a8a5ac591a2e28c958fe2ac66eb940`**。V1.2 原版 `core.py`、`overlay.py`、`win_screen.py`、`cues.py` 的 Git blob SHA 再次核对与 V1.2 原样一致，Small OCR 仍使用 V1.2 检测尺寸参数，无 V1.4 的 max/1280；Medium 模型及已删除的自动场景变化检测仍不恢复；旧 V1.2/V2.0 和 main 源码没有覆盖。
+- **CI 测试/构建（真正 Windows runner）**：最终 GitHub Actions **run `42640318964` completed/success**，包含所有 Python 单元测试、特别是模拟 cp1252 的二进制 UTF-8 输入测试、配置状态分类测试；V1.2 Small PP-OCRv6 DET+REC 两模型与冻结 EXE 实际 OCR、系统语音API、官方原版 Luna 二进制+GPL源码、**冻结 EXE 的带中文与空格路径 JSON 文件端到端读取自测**、UIA与主界面启动、ZIP 打包/Artifact 上传全部通过。早期 CI run 42639636517 对已存在中文文件误报不存在，促成确认编码错误和修复；只有最后新 run 标记为合格。
+- **新下载包**：`GameTextReader-V12Base-NaturalVoice-ConfigRouteFix-Experimental`，GitHub Actions artifact id **13684269589**，下载页 https://github.com/vobichngan285-collab/-/actions/runs/42640318964/artifacts/13684269589；约 129,757,494 字节；截止 2026-12-09 的临时 artifact。下载是**公开无私人配置的包**；用户应另行在本机使用自己现有的原版 config.json，只选择本地文件，不上传密钥/内容。建议解压到独立目录，直接选已安装 Yunxi 试听；如果仍报错，截图错误代码即可。
+- **重要验收边界**：**尚未在用户 Windows 11 真机确认云希/晓晓发声。** CI 证明 Windows 路径编码与跨进程文件读取正常，无法代替真实 Windows 语音模型与微软 SDK 授权/合成验证。如果后续错误推进到 `embedded_sdk_rejected_synthesis`、native runtime、IPC 等阶段，按该新码针对性处理；不得宣称“一切语音已修好”。截图出现自然音色仍只是“已安装、待试听”。
+- **用户下一轮鼠标悬停 OCR、暗屏框选、独立模式切换等**仍只是待开发；本轮没有动这些功能。
