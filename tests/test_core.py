@@ -133,4 +133,4 @@ def test_generated_cues_are_short_mono_pcm():
         with wave.open(BytesIO(make_click_wave(kind)), "rb") as wav:
             assert wav.getnchannels() == 1
             assert wav.getsampwidth() == 2
-            assert wav.getnframes() < 2000
+            assert wav.getnframes() / wav.getframerate() < 0.20
