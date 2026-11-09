@@ -175,7 +175,7 @@ def packaged_ui_selftest() -> int:
 
 
 def packaged_app_selftest() -> int:
-    """Run the ACTUAL V1.3 UI construction without requiring a game."""
+    """Run the ACTUAL V1.6 UI construction without requiring a game."""
     import tempfile
     import traceback
     from pathlib import Path
@@ -189,7 +189,7 @@ def packaged_app_selftest() -> int:
         app = ReaderApp(root)
         root.update_idletasks()
         if app.hover.dwell_ms != 0:
-            raise RuntimeError("V1.3 must never keep the old hover delay")
+            raise RuntimeError("V1.6 must never keep the old hover delay")
         if app.overlay is None:
             raise RuntimeError("Native green outline initialization failed: " +
                                app.overlay_error)
@@ -198,7 +198,7 @@ def packaged_app_selftest() -> int:
                                app.accessibility_status)
         app.close()
         root = None
-        log.write_text("PASS\nFull V1.3 window, accessibility and frame ready", encoding="utf-8")
+        log.write_text("PASS\nFull V1.6 window, accessibility and frame ready", encoding="utf-8")
         return 0
     except BaseException:
         log.write_text("FAIL\n" + traceback.format_exc(), encoding="utf-8")
