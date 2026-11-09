@@ -216,7 +216,12 @@ def packaged_app_selftest() -> int:
                     raise RuntimeError("Hidden settings page is still exposed: " + key)
         app.close()
         root = None
-        log.write_text("PASS\nFull blue UI, accessibility and frame ready"\n                       + "\nUIA: " + app.accessibility_status\n                       + "\nNamed native controls: " + str(len(app.accessibility_targets))\n                       + "\nTested pages: 6", encoding="utf-8")
+        log.write_text(
+            "PASS\nFull blue UI, accessibility and frame ready"
+            + "\nUIA: " + app.accessibility_status
+            + "\nNamed native controls: " + str(len(app.accessibility_targets))
+            + "\nTested pages: 6",
+            encoding="utf-8")
         return 0
     except BaseException:
         log.write_text("FAIL\n" + traceback.format_exc(), encoding="utf-8")
