@@ -196,9 +196,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $csc = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
           if (-not (Test-Path $csc)) { throw 'Missing .NET Framework compiler' }
-          & $csc /nologo /target:winexe /platform:x64 /optimize+ /r:System.Windows.Forms.dll /r:System.Drawing.dll /out:dist/GameTextReader/BaoYiVoiceInspector_V2.exe diagnostics/BaoYiVoiceInspector.cs
+          & $csc /nologo /target:winexe /platform:x64 /optimize+ /r:System.Windows.Forms.dll /r:System.Drawing.dll /out:dist/GameTextReader/BaoYiVoiceInspector_V2.exe .\diagnostics\BaoYiVoiceInspector.cs
           if ($LASTEXITCODE -ne 0) { throw 'BaoYi V2 inspector compile failed' }
-          & $csc /nologo /target:exe /platform:x64 /out:"$env:RUNNER_TEMP/BoySpeechSlave_TestDummy.exe" diagnostics/ProbeHost.cs
+          & $csc /nologo /target:exe /platform:x64 /out:"$env:RUNNER_TEMP/BoySpeechSlave_TestDummy.exe" .\diagnostics\ProbeHost.cs
           if ($LASTEXITCODE -ne 0) { throw 'Harmless speech-host dummy compile failed' }
           Copy-Item diagnostics/README_V2.txt dist/GameTextReader/BaoYiVoiceInspector_V2_README.txt
       - name: Test V2 investigator with actual Windows dummy process
