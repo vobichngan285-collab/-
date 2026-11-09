@@ -209,3 +209,12 @@
 - **最终CI：** [42583872881](https://github.com/vobichngan285-collab/-/actions/runs/42583872881) **completed/success**，26项源码测试、Small/Medium真实权重OCR、冻结 EXE、无障碍绿框、系统语音合成与模拟 GuangrongHost PCM 通过；不能据此声称真人扬声器或官方广荣 DLL 可发声。
 - **实际交付：** [V1.7 Windows x64 ZIP 工件](https://github.com/vobichngan285-collab/-/actions/runs/42583872881/artifacts/13658427538)（30天保留）；内层 `GameTextReader_V1.7_Medium_CPU2_Windows_x64_Portable.zip`，194,448,729 bytes，SHA256 `df9a054ba44b041bc75b8906030bd41367d25a71dee96dcd346e54c3eef37287`。本轮已实际下载验证外层+内层 ZIP CRC、EXE、广荣宿主、OCR 模型和无第三方 grtts DLL。
 - **未完成 / 下一步：** 用户 Windows11 电脑安装同图对比 Small 与 Medium 的真实 F8 耗时、文字命中和朗读；若速度仍不能接受，再考虑其它 Medium 识别执行方案。广荣 `grtts_x64.dll` 官方独立加载 ERROR1114 问题**本轮没有修复**，可参考已完成只读 BaoYi 调查工具，等待真实电脑调查证据。不要再次重复旧模拟 PCM 或 Android CRAFT 实验。
+
+## 2026-11-09 · V1.8 Small-only + BaoYi Voice Inspector V2（CI 已通过，用户电脑待验收）
+
+- 用户真机 V1.7 Medium 日志：`2560x1440`，79框总53.587s、48框总34.298s，模型加载/锁等待0ms，Small DET约0.5–0.6s，Medium REC约33.7–52.9s。用户决定后续版本移除 Medium，转而集中解决广荣微软语音。
+- V1.8 分支 `feat/windows-v18-small-only-baoyi-voice-probe-20261109`，Build Commit `ea6988ac0e8fa45340e9bed62098f05350d0e19d`。删 Medium UI/识别调用/权重，旧 `tier=medium` 自动迁移 Small，只保留官方 PP-OCRv6 Small DET+REC 及原快识配置；F8、绿色文字框、60秒过期、原 SAPI/WinRT 及广荣实验入口保持。
+- 用户保益悦听 12.10 真机只读 V1 报告（2026-11-09 16:53）表明存在 `BoySpeechSlave.exe`、`BoyTTS.dll` 安装文件，未直接发现已加载的 `grtts_x64.dll`；旧扫描器遗漏了进程名筛选、把自己当成保益相关进程。V2 新增明确语音辅助进程识别、候选进程架构、`BoyTTS.dll` 加载观察、自身排除、只读脱敏，**并未解决独立广荣发声**。需用户在保益正常朗读时回传 V2 报告；官方 DLL 单独加载 ERROR1114 仍待证实实际环境关系。
+- GitHub Windows Actions [42595587940](https://github.com/vobichngan285-collab/-/actions/runs/42595587940)：首次排队后取消（completed/failure），明确重新运行第二次 **completed/success**；27个 Python 单元测试、真实 Small OCR 中英文本图、冻结EXE、SAPI/WinRT、模拟独立广荣PCM、UIA、V2 调查工具真实模拟进程、两个Small权重验证成功。模拟语音不证明云希/晓晓实际发声。
+- 主程序 artifact [13667257789](https://github.com/vobichngan285-collab/-/actions/runs/42595587940/artifacts/13667257789)，内层 `GameTextReader_V1.8_Small_TTSProbe_Windows_x64_Portable.zip`，126636816 bytes，SHA256 `0aa81272efc8a82fe63ab2eb7529b98995fd483116c3011aa65a8bb46d53cc38`。独立 V2 工具 artifact [13667013340](https://github.com/vobichngan285-collab/-/actions/runs/42595587940/artifacts/13667013340)，内层 `BaoYiVoiceInspector_V2_ReadOnly.zip`，14150 bytes，SHA256 `b0c8589469705e93aa88a916c631609029742bc9c9dcf83831ee13166e6057fe`。两套内外层 ZIP CRC 实际校验通过，游戏包仅两个 Small ONNX，包含调查工具，无需重复下载。产物为限期 Actions artifact。
+- 下次新对话优先读简短入口 `CURRENT_HANDOFF.md`，回传 V2 真机报告、核查 Small 和朗读回归；不要重新折腾 Medium 或旧安卓离线 OCR；不得声称调查成功等于广荣成功。
