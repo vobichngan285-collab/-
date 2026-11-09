@@ -136,6 +136,9 @@ def packaged_picker_selftest() -> int:
         app.region_info_var = tk.StringVar(master=root, value="old")
         app.persist = lambda: None
         app.status = lambda text: None
+        # Frozen picker smoke test checks dragging and release; the actual
+        # Small ONNX model is exercised separately by --self-test-ocr.
+        app._start_selected_ocr = lambda *args: None
         for step in range(3):
             app.select_region()
             for _ in range(5):
