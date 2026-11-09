@@ -1,4 +1,4 @@
-name: Build portable Windows game text reader V1.7 Medium A/B
+name: Build Windows game text reader V1.7 Medium CPU2 final experiment
 on:
   workflow_dispatch:
   push:
@@ -209,12 +209,12 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory release -Force | Out-Null
-          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_V1.7_Medium_AB_Windows_x64_Portable.zip -CompressionLevel Optimal -Force
-          $size = (Get-Item release/GameTextReader_V1.7_Medium_AB_Windows_x64_Portable.zip).Length
+          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_V1.7_Medium_CPU2_Windows_x64_Portable.zip -CompressionLevel Optimal -Force
+          $size = (Get-Item release/GameTextReader_V1.7_Medium_CPU2_Windows_x64_Portable.zip).Length
           Write-Output "Portable archive size: $size bytes"
       - uses: actions/upload-artifact@v4
         with:
-          name: GameTextReader-V1.7-Medium-AB-Portable
-          path: release/GameTextReader_V1.7_Medium_AB_Windows_x64_Portable.zip
+          name: GameTextReader-V1.7-Medium-CPU2-Portable
+          path: release/GameTextReader_V1.7_Medium_CPU2_Windows_x64_Portable.zip
           if-no-files-found: error
           retention-days: 30
