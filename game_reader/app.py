@@ -1066,6 +1066,11 @@ class ReaderApp:
     def invalidate(self, reason: str):
         """Actually erase all text, coordinates, hover state and audio."""
         self.capture_id += 1
+        # A canceled worker's late event is ignored. Release the UI busy flag
+        # NOW or a clear-key press during OCR could disable future captures.
+        self.busy = False
+        if hasattr(self, "read_btn"):
+            self.read_btn.configure(state="normal")
         self.mode_generation += 1  # Stale hover OCR must not revive erased text.
         self.pending_full_capture = False
         self._hover_last_text = ""
@@ -1113,12 +1118,14 @@ class ReaderApp:
             try:
                 focus = foreground_window_id()
                 image, origin = grab_current_monitor()
+                capture_ms = round((time.monotonic() - started) * 1000)
                 phase = f"离线OCR推理（{tier}）"
                 with self._ocr_lock:
                     lines = self.ocr_worker.recognize(image, origin, tier)
+                infer_ms = round((time.monotonic() - started) * 1000) - capture_ms
                 self.events.put(("ocr_ok", capture_id, lines,
                                  round((time.monotonic() - started) * 1000),
-                                 focus))
+                                 focus, "fullscreen", (capture_ms, infer_ms)))
             except Exception as exc:
                 self.events.put(("ocr_fail", capture_id,
                                  "phase: " + phase + "\n" +
@@ -1150,7 +1157,9 @@ class ReaderApp:
                     self.status(f"识别完成：{len(self.lines)} 个朗读区域；"
                                 f"耗时 {milliseconds} 毫秒{timing_note}。"
                                 "60 秒后自动清空。")
-                    if (self.lines and self.mouse_mode == "pointer"
+                    speakable = filter_speech_text(
+                        "\n".join(region.text for region in self.lines), self.settings)
+                    if (speakable and self.mouse_mode == "pointer"
                             and self.settings.get("success_cue", True)):
                         self.cues.play("complete")
                     if source == "selection" and self.mouse_mode == "hover":
