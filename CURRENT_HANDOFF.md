@@ -1,26 +1,23 @@
-# Windows 游戏文字助手｜当前交接（2026-11-09）
+# Windows 游戏文字助手｜当前交接（2026-11-09 · V1.8）
 
-**当前唯一重点：Windows 11 电脑游戏 OCR 文字助手。** 安卓云端「蓝星向导」暂时搁置；安卓纯离线 OCR/CRAFT 已放弃。不要混淆两个 GitHub 仓库或重做安卓实验。
+**当前仅重点开发 Windows 11 游戏 OCR + 鼠标指向文字朗读；安卓「蓝星向导」暂时搁置，旧安卓离线 OCR/CRAFT 已放弃。** 本仓库 https://github.com/vobichngan285-collab/- 。新对话先读本文件即可，历史在 `RELEASE_STATUS.md`，不必重复旧实验。
 
-**GitHub 原仓库：** https://github.com/vobichngan285-collab/-  
-**下次新对话先读本文件；旧版流水账仅在需要时再读 `RELEASE_STATUS.md`。** `main` 是交接和旧版本入口，当前 Windows V1.7 实验代码在独立分支，勿误从 main 重建旧包。
+## 当前完成版本
 
-## 1. 当前已做完
+- **V1.8 Small 单模型 + 保益语音调查 V2：** GitHub 实验分支 `feat/windows-v18-small-only-baoyi-voice-probe-20261109`；构建源码 HEAD `ea6988ac0e8fa45340e9bed62098f05350d0e19d`；GitHub Actions [42595587940](https://github.com/vobichngan285-collab/-/actions/runs/42595587940)，**第二次运行 completed/success**，28个CI步骤成功（第一次运行未执行，任务被取消）。
+- **Windows 游戏助手下载：** [V1.8 Small + TTSProbe 产物](https://github.com/vobichngan285-collab/-/actions/runs/42595587940/artifacts/13667257789)。GitHub Actions 外层ZIP内含 `GameTextReader_V1.8_Small_TTSProbe_Windows_x64_Portable.zip`，126,636,816字节、SHA256 `0aa81272efc8a82fe63ab2eb7529b98995fd483116c3011aa65a8bb46d53cc38`。已真实下载，内外ZIP CRC通过，包含 `GameTextReader.exe`、`GuangrongHost.exe`、`BaoYiVoiceInspector_V2.exe`，OCR权重恰好只有 Small DET/REC 两个。
+- **独立只读语音调查工具下载：** [BaoYiVoiceInspector V2](https://github.com/vobichngan285-collab/-/actions/runs/42595587940/artifacts/13667013340)。内层 `BaoYiVoiceInspector_V2_ReadOnly.zip`，14,150字节、SHA256 `b0c8589469705e93aa88a916c631609029742bc9c9dcf83831ee13166e6057fe`，内外 ZIP CRC 通过，内含 EXE+README。该工具也已包含在 V1.8 主包中，**用户无需重复下载两次**。Actions artifact 可能约 30 天过期，GitHub 下载通常需登录。
+- **OCR 最新决定：** 用户的真实 V1.7 Medium 日志记录 48 行耗时约34.3秒、79行约53.6秒，单次 Medium REC 约占推理98%；确定不再继续优化此模型。V1.8 已删除 Medium 选项、调用和权重，只保留 PP-OCRv6 Small DET+REC；旧配置 `tier=medium` 自动迁移为 `small`。F8 单键自定义、鼠标指向朗读、绿色文字框、60秒过期、原系统SAPI/WinRT和广荣入口保持。
+- **自动测试边界：** Windows 2025 CI 已通过 27项 Python 测试、官方 Small ONNX 的英文/中文合成图 OCR、冻结 EXE 启动、SAPI/WinRT 合成、模拟广荣宿主 IPC PCM、UIA、两个 Small 权重包检验、V2 进程调查模拟（模拟 BoySpeechSlave 进程、32/64位判断、过滤调查工具自身、路径脱敏）。CI没有真实保益音色，不能宣称云希/晓晓已经成功。
+- **之前的下载和改动：** V1.7 实验在 `exp/windows-medium-latency-v17-20261109`，成功 Actions 42583872881；V1.6 旧版亦保留。不要覆盖原版本目录。
 
-- **Windows V1.7 Medium 延迟优化实验版：** 分支 `exp/windows-medium-latency-v17-20261109`，构建源码 Commit `1e9c216d1bf5ec7f7cb7facc239375fcff64d525`。原 V1.6 未覆盖。
-- **正式 CI 通过：** https://github.com/vobichngan285-collab/-/actions/runs/42583872881 ，26 项单元测试、真实官方模型 Small/Medium 中英文 OCR、冻结 EXE、无障碍绿色框、SAPI/WinRT 合成和模拟广荣 PCM 通路回归通过（不等于用户电脑实测或真实广荣发声）。
-- **V1.7 ZIP：** https://github.com/vobichngan285-collab/-/actions/runs/42583872881/artifacts/13658427538 ；内层 `GameTextReader_V1.7_Medium_CPU2_Windows_x64_Portable.zip`，194,448,729 bytes，SHA256 `df9a054ba44b041bc75b8906030bd41367d25a71dee96dcd346e54c3eef37287`；助手下载后对内外两层 ZIP 做了 CRC 校验，包含 `GameTextReader.exe` / `GuangrongHost.exe`，未捆绑第三方 DLL。此为 GitHub Actions 临时 artifact，不是永久 Release。
-- **实际改动仅限 OCR：** Small 模型/配置不变；Medium 使用同一个 Small DET + Medium REC，默认 REC batch 2、ONNX CPU 线程 2。预热改为 750ms 防抖并丢弃过期任务；OCR 诊断拆成 `model_lock_wait_ms`、`model_load_ms`、`inference_ms`，保留原 `model_ms`。保留 F8 单键截图、鼠标指向文字朗读、绿色坐标框、60 秒清空等功能。
-- **Windows CI 测试事实：** 最后一次固定CPU2条件下，batch6→batch2：4行 559→550ms、18行 2124.5→1909ms，文字/坐标完全相同；此前另轮测试约快5%，波动存在。CPU2 对照自动线程在前后顺序反转复测后只快约3%～4%，早期更大改善不稳定。**不要声称数倍提速**，CI 也不代替用户电脑实际 F8 等待；Medium REC 仍是主要耗时来源。
+## 当前待查：独立微软广荣语音
 
-## 2. 现在仍存在的两个问题
+- **用户真实保益悦听 12.10 只读 V1 报告（2026-11-09 16:53）**：安装在 `C:\Program Files (x86)\BoyPcReader\`，找到目录中的 `BoySpeechSlave.exe`、`BoyTTS.dll`，但没有发现明确广荣 DLL 的内存加载记录；扫描误把调查工具自身识别成保益窗口，遗漏语音辅助进程名字，未标明进程位数。
+- **V2 修复调查盲点：** 显式监测 `BoySpeechSlave`、`BoyVoiceInput`、`BoyTTS.dll`，报告候选进程32/64位，排除调查工具自身；不联网、不发送语音、不注入、不改保益、不读取配置/许可证。让用户在保益正朗读云希/晓晓时点击 V2「开始只读扫描」，复制报告；按真实证据判断语音链路。
+- **独立广荣现实状态：** 官方 `grtts_x64.dll` 在干净 Windows CI 加载返回 Windows ERROR1114；模拟 DLL PCM 成功不等于官方引擎或用户扬声器成功。V1.8 **没有修复**独立云希/晓晓发声。不要重做已失败无环境 DLL 试验、绕开许可证或冒称已修复。
 
-**A. Medium OCR 慢，鼠标指向朗读可能受识别完成等待影响。** 用户亲测 Small 相对流畅；Medium 按 F8 后窗口不死机，但识别结果长时间不出现、自然无法即时指向朗读。V1.7 是已通过云端测试的保守调度实验包，**尚未在用户 Windows 11 真机验证**。下次请先在新目录解压 V1.7，拿同一游戏画面分别按 F8 测 Small/Medium；点「复制链路日志」，看截图、锁等待、加载、推理、有效文字框数量、是否能鼠标命中。不要自行假定 TTS 导致 OCR 推理慢。
+## 下一步
 
-**B. 广荣微软 TTS 的云希/晓晓仍未成功独立使用。** Windows 原版 `grtts_x64.dll` 在干净 CI 加载出现 ERROR 1114，真实声音与 PCM 均未证实；V1.6 的模拟本地 IPC/PCM 通过只证明自研链路。此前已制作 `BaoYiVoiceInspector.exe` 只读调查工具，Windows 测试成功但**尚无用户电脑真实报告**；如果继续查广荣，要使用真实保益悦听运行时证据，别重复做已失败的无环境 DLL 加载实验。TTS 与 OCR 优化是两件事。
-
-## 3. 下一步与纪律
-
-- **优先等用户真机测试 V1.7**，比较实际 F8 延迟、识别框、鼠标指向朗读；如果没有实际改善，再讨论更换推理执行后端或更激进的 Medium 优化，不能盲目反复改参数。
-- **暂不碰广荣 TTS 或安卓蓝星向导**，除非用户新指令明确要求。
-- 任何新开发先核对 GitHub 实际分支 HEAD、Actions、历史源码，**未经授权不改代码、不构建、不重新开仓**；重要进展更新本简短文件、在 `main:RELEASE_STATUS.md` 追加一条历史记录，提交并回读。不要夸大构建成功、合成成功与真实电脑可用的区别。
+- 用户把 V1.8 ZIP 解压到新目录，确认 Small F8 识别与原声音回归正常；重点运行 `BaoYiVoiceInspector_V2.exe` 并把复制的只读报告发来。不要把工具的「查到文件名」误当成「成功合成」。
+- 修改前读取当前分支 HEAD/Actions/交接；未经授权不改、不构建。每次重要进展在此更新短交接、在 `main:RELEASE_STATUS.md` 追加历史并回读核实；不重建安卓项目。
