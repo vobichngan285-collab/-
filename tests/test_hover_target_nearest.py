@@ -135,6 +135,7 @@ def test_desktop_center_crop_scans_even_when_progman_is_foreground(monkeypatch):
             return [OCRLine("DLSS", 520, 546, 605, 572)]
 
     app.ocr_worker = OCR()
+    app._ocr_lock = threading.Lock()
     monkeypatch.setattr(mod, "get_cursor", lambda: (540, 500))
     monkeypatch.setattr(mod, "foreground_class", lambda: "Progman")
     monkeypatch.setattr(mod, "monitor_rect_at_cursor",
