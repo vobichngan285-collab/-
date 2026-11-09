@@ -187,6 +187,33 @@ def packaged_app_selftest() -> int:
         if "PROVIDED" not in app.accessibility_status and "ANNOTATED" not in app.accessibility_status:
             raise RuntimeError("Accessible widget provider failed: " +
                                app.accessibility_status)
+        # After the blue theme redesign, verify that navigation and every
+        # interactive filter still uses native, named, keyboard-focusable Tk
+        # controls. Hidden pages must actually be unmapped so UIA does not
+        # accidentally send the user into controls underneath another page.
+        assert len(app.accessibility_targets) >= 30, "Missing UIA naming targets"
+        for control, label in app.accessibility_targets:
+            if not control.winfo_exists() or not label.strip():
+                raise RuntimeError("Lost accessible control: " + label)
+            if control.winfo_class() in ("Canvas", "Label") and control in (
+                    app.filter_english_check, app.filter_numbers_check,
+                    app.filter_symbols_check, app.voice_select):
+                raise RuntimeError("A native interactive control became decorative")
+        assert app.filter_english_check.winfo_class() == "TCheckbutton"
+        assert app.filter_numbers_check.winfo_class() == "TCheckbutton"
+        assert app.filter_symbols_check.winfo_class() == "TCheckbutton"
+        assert app.voice_select.winfo_class() == "TCombobox"
+        assert app.similarity_spin.winfo_class() == "TSpinbox"
+        for selected in ("mouse", "voice", "fullscreen", "filters",
+                         "general", "about", "mouse"):
+            app.show_page(selected)
+            root.update_idletasks()
+            if app.current_page != selected:
+                raise RuntimeError("Navigation failed to select " + selected)
+            for key, page in app._pages.items():
+                mapped = bool(page.winfo_manager())
+                if mapped != (key == selected):
+                    raise RuntimeError("Hidden settings page is still exposed: " + key)
         app.close()
         root = None
         log.write_text("PASS\nFull V1.2 window, accessibility and frame ready", encoding="utf-8")
