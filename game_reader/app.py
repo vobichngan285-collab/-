@@ -159,7 +159,8 @@ class ReaderApp:
             mode_row, text=self.settings["local_hotkey_label"], width=18,
             command=lambda: self.begin_hotkey("local_vk"))
         self.local_key_button.pack(side="left", padx=5)
-        self.mouse_mode_var = tk.StringVar(value="当前：默认鼠标指向朗读（F9 切换）")
+        self.mouse_mode_var = tk.StringVar(
+            value=f'当前：默认鼠标指向朗读（{self.settings["mode_hotkey_label"]} 切换）')
         ttk.Label(modes, textvariable=self.mouse_mode_var,
                   foreground="#245ca5").pack(anchor="w", pady=(4, 2))
         options_row = ttk.Frame(modes)
@@ -361,6 +362,8 @@ class ReaderApp:
         label = hotkey_label(vk, keyname)
         self.settings[field] = vk
         self.settings[label_field] = label
+        if field == "mode_vk" and self.mouse_mode == "pointer":
+            self.mouse_mode_var.set(f"当前：默认鼠标指向朗读（{label} 切换）")
         self._hotkey_previous[field] = True
         self.finish_hotkey()
         self.persist()
@@ -452,11 +455,13 @@ class ReaderApp:
             if self.root.state() == "normal":
                 self.root.iconify()
             self.status("已进入鼠标悬停 OCR 模式；识别区域会跟随鼠标。")
+            self.cues.play("complete")
         else:
             self.mouse_mode_var.set("当前：默认鼠标指向已识别文字朗读")
             self._hover_next_due = float("inf")
             self.update_output("\n".join(line.text for line in self.lines))
             self.status("已切换回原来的鼠标指向朗读模式。")
+            self.cues.play("hover")
 
     def import_luna_config(self):
         selected = filedialog.askopenfilename(
@@ -558,6 +563,7 @@ class ReaderApp:
             return False
         if self.root.state() == "normal":
             if manual:
+                self._hover_next_due = time.monotonic() + 1.0
                 self.root.iconify()
                 self.root.after(260, lambda: self.start_hover_ocr(True))
             return False
