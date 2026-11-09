@@ -546,6 +546,80 @@ class ReaderApp:
             self.speech.set_volume(value)
             self.persist()
 
+    def start_hover_ocr(self, manual: bool = False):
+        """One mouse-relative screenshot; do not queue overlapping OCR jobs."""
+        if (self.closed or self._choosing_region or self.mouse_mode != "hover"):
+            if manual and self.mouse_mode != "hover":
+                self.status("请先用模式快捷键切换到鼠标悬停 OCR。")
+            return False
+        if self.busy or self.hover_ocr_busy or self.pending_full_capture:
+            if manual:
+                self.status("OCR 正在处理上一张图；本次不排队。")
+            return False
+        if self.root.state() == "normal":
+            if manual:
+                self.root.iconify()
+                self.root.after(260, lambda: self.start_hover_ocr(True))
+            return False
+        try:
+            cursor = get_cursor()
+            monitor = monitor_rect_at_cursor()
+            relative = RelativeRegion.from_settings(self.settings["region"])
+            box = capture_box(relative, cursor, monitor)
+        except Exception as exc:
+            self.status("局部 OCR 截图区域错误：" + type(exc).__name__)
+            return False
+
+        self.hover_ocr_busy = True
+        generation = self.mode_generation
+        self._hover_next_due = time.monotonic() + self.settings["period_ms"] / 1000.0
+
+        def work():
+            started = time.monotonic()
+            try:
+                image = ImageGrab.grab(bbox=box, all_screens=True).convert("RGB")
+                if image.size != (box[2] - box[0], box[3] - box[1]):
+                    raise RuntimeError("局部截图尺寸与显示器范围不一致")
+                lines = self.ocr_worker.recognize(image, box[:2], "small")
+                self.events.put(("hover_ok", generation, lines, manual,
+                                 round((time.monotonic() - started) * 1000)))
+            except Exception:
+                self.events.put(("hover_fail", generation,
+                                 traceback.format_exc()))
+        threading.Thread(target=work, daemon=True, name="MouseRegionSmallOCR").start()
+        return True
+
+    def _handle_hover_result(self, generation: int, lines: list[OCRLine],
+                             manual: bool, elapsed: int):
+        self.hover_ocr_busy = False
+        self._hover_next_due = time.monotonic() + self.settings["period_ms"] / 1000.0
+        if self.pending_full_capture:
+            self.pending_full_capture = False
+            self.capture()
+            return
+        if generation != self.mode_generation or self.mouse_mode != "hover":
+            return
+        regions = build_reading_regions(lines)
+        text = "\n".join(region.text for region in regions).strip()
+        normalized = normalized_text(text)
+        changed = normalized != self._hover_last_text
+        if changed:
+            self._hover_last_text = normalized
+        if not normalized:
+            if changed:
+                self.speech.stop()
+                self.update_output("")
+            if manual:
+                self.status("局部 OCR 没有识别到文字；可调整框选范围。")
+            return
+        if changed or manual:
+            self.speech.stop()
+            self.update_output(text)
+            self.speak_selected(text[:1900])
+            self.status(f"局部 OCR 已识别 {len(regions)} 个朗读区域，"
+                        f"耗时 {elapsed} 毫秒；"
+                        + ("手动识别。" if manual else "检测到新文字，已朗读。"))
+
     def invalidate(self, reason: str):
         """Actually erase all text, coordinates, hover state and audio."""
         self.capture_id += 1
@@ -564,8 +638,16 @@ class ReaderApp:
         self.root.after(250, self.capture)
 
     def capture(self):
+        if self.hover_ocr_busy:
+            # A manual full-screen hotkey takes precedence over periodic OCR.
+            # Keep at most one pending full capture and never share an active
+            # RapidOCR instance across simultaneous worker threads.
+            self.pending_full_capture = True
+            self.status("局部 OCR 正在结束；随后执行全屏截图（不排队）。")
+            return
         if self.busy:
             return
+        self.pending_full_capture = False
         self.invalidate("正在识别新画面...")
         capture_id = self.capture_id
         self.busy = True
