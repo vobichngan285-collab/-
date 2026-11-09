@@ -236,11 +236,11 @@ jobs:
         run: |
           New-Item -ItemType Directory release -Force | Out-Null
           Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_V12Base_MouseHover_SideHotkeys_Experimental_x64.zip -CompressionLevel Optimal -Force
-          $size = (Get-Item release/GameTextReader_V12Base_NaturalVoice_ConfigRoute_Fix_Experimental_x64.zip).Length
+          $size = (Get-Item release/GameTextReader_V12Base_MouseHover_SideHotkeys_Experimental_x64.zip).Length
           Write-Output "Portable archive size: $size bytes"
       - uses: actions/upload-artifact@v4
         with:
           name: GameTextReader-V12Base-MouseHover-SideHotkeys-Experimental
-          path: release/GameTextReader_V12Base_NaturalVoice_ConfigRoute_Fix_Experimental_x64.zip
+          path: release/GameTextReader_V12Base_MouseHover_SideHotkeys_Experimental_x64.zip
           if-no-files-found: error
           retention-days: 30
