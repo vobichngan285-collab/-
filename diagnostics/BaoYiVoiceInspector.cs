@@ -42,7 +42,14 @@ namespace BaoYiVoiceInspector
                         if (redacted.Contains(home) || !redacted.Contains("%USERPROFILE%"))
                             throw new Exception("User folder redaction regression");
                     }
-                    File.WriteAllText(path, "PASS: matching, module detection, user-path redaction", Encoding.UTF8);
+                    using (var form = new InspectorForm())
+                    {
+                        if (!HasAccessibleControl(form, "开始只读扫描保益语音组件") ||
+                            !HasAccessibleControl(form, "复制调查报告到剪贴板") ||
+                            !HasAccessibleControl(form, "只读调查报告内容"))
+                            throw new Exception("Screen reader accessible control names missing");
+                    }
+                    File.WriteAllText(path, "PASS: matching, redaction and accessible WinForms controls", Encoding.UTF8);
                     Environment.ExitCode = 0;
                 }
                 catch (Exception ex)
@@ -75,6 +82,13 @@ namespace BaoYiVoiceInspector
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new InspectorForm());
+        }
+        private static bool HasAccessibleControl(Control root, string accessibleName)
+        {
+            if (root.AccessibleName == accessibleName) return true;
+            foreach (Control child in root.Controls)
+                if (HasAccessibleControl(child, accessibleName)) return true;
+            return false;
         }
     }
 
@@ -438,7 +452,13 @@ namespace BaoYiVoiceInspector
                     string name = "";
                     try { name = process.ProcessName; }
                     catch { continue; }
-                    bool isProduct = IsProduct(name) || ProductWindows.Contains(process.Id);
+                    // A browser tab or Explorer folder may happen to contain
+                    // "保益悦听" in its title. Do not mistake that for the reader.
+                    bool genericHost = ContainsAny(name, new string[] {
+                        "chrome", "msedge", "firefox", "browser", "explorer",
+                        "brave", "opera", "vivaldi", "sogou", "360se" });
+                    bool isProduct = IsProduct(name) ||
+                        (ProductWindows.Contains(process.Id) && !genericHost);
                     List<ProcessModule> modules = new List<ProcessModule>();
                     try
                     {
@@ -532,7 +552,12 @@ namespace BaoYiVoiceInspector
                     try
                     {
                         string dir = Path.Combine(item.Directory, child);
-                        if (Directory.Exists(dir)) fileMatches += ScanDirectory(dir, text);
+                        if (Directory.Exists(dir))
+                        {
+                            text.AppendLine("  发现相关子目录：" + child +
+                                            "；" + RedactPath(dir));
+                            fileMatches += ScanDirectory(dir, text);
+                        }
                     }
                     catch (Exception) { }
                 }
