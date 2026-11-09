@@ -1,7 +1,7 @@
 """Local Windows speech. SAPI and documented WinRT voices, no cloud APIs."""
 from __future__ import annotations
 from queue import Queue, Empty
-from threading import Thread
+from threading import Thread, Lock
 import sys
 from .winrt_speech import WinRTSpeechWorker, enumerate_winrt_voices
 from .luna_bridge import LunaNaturalBridge
@@ -32,6 +32,8 @@ def enumerate_sapi_voices() -> list[tuple[str, str]]:
 class SpeechWorker:
     def __init__(self, on_error=None, on_event=None):
         self._commands = Queue()
+        self._speech_lock = Lock()
+        self._speech_generation = 0
         self._on_error = on_error
         self._on_event = on_event
         self._winrt = None  # create WinRT media player only if WinRT voice is selected
@@ -56,6 +58,16 @@ class SpeechWorker:
                 except Empty:
                     pythoncom.PumpWaitingMessages()
                     continue
+                # Only the latest queued speech is allowed to reach SAPI,
+                # WinRT or the author's untouched Luna natural voice engine.
+                if command in ("latest_speak", "latest_natural_speak"):
+                    payload, generation = arg
+                    with self._speech_lock:
+                        if generation != self._speech_generation:
+                            continue
+                    command = ("speak" if command == "latest_speak"
+                               else "natural_speak")
+                    arg = payload
                 if command == "exit":
                     voice.Speak("", 3)
                     if self._winrt is not None:
@@ -165,12 +177,18 @@ class SpeechWorker:
 
     def speak(self, text: str, *, natural_voice_id: str = "",
               config_path: str = ""):
+        with self._speech_lock:
+            self._speech_generation += 1
+            generation = self._speech_generation
         if natural_voice_id:
-            self._commands.put(("natural_speak", (text, natural_voice_id, config_path)))
+            self._commands.put(("latest_natural_speak",
+                                ((text, natural_voice_id, config_path), generation)))
         else:
-            self._commands.put(("speak", text))
+            self._commands.put(("latest_speak", (text, generation)))
 
     def stop(self):
+        with self._speech_lock:
+            self._speech_generation += 1
         self._commands.put(("stop", None))
 
     def set_voice(self, voice_id: str):
