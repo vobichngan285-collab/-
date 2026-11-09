@@ -1,3 +1,19 @@
+# 游戏文字助手 V1.6 · 独立广荣引擎兼容性测试 · 2026-11-09
+
+本版只针对 V1.5 的广荣 TTS 加载错误。**OCR 两档、检测范围、边角识别和语音内容均没有调整**，Medium 仍存在用户已报告的十几秒和漏识别现象。
+
+**[下载 V1.6 Windows x64 免安装实验包](https://github.com/vobichngan285-collab/-/actions/runs/42556569339/artifacts/13647478200)**。请将新 ZIP 完整解压到一个新目录，不要覆盖 V1.5；运行 `GameTextReader/GameTextReader.exe`，同目录必须存在新的 `GuangrongHost.exe`。
+
+V1.6 修复的是**程序架构**而非已经证明可用的广荣微软语音：不再使用 PyInstaller 的 ctypes/multiprocessing 子进程调用原版 DLL，改为独立 Windows C++ x64 原生辅助程序加载 DLL、输出 PCM，经匿名管道交回游戏助手，保益悦听不参与，原语速和音量不改。取消了鼠标进入文字框的短提示音，F8 完成只响清脆叮声，延续 V1.5。
+
+**官方真实引擎依然存在兼容性风险：**在干净 Windows 2025 测试机器上，从广荣作者发布的原始 1.1.0 安装包提取完整 `synthDrivers`，用本版 C++ 原生辅助程序加载 `grtts_x64.dll` 时仍返回 Windows **1114**（DLL 初始化例程失败），不是语音已成功播放。真实检验：[官方原版 DLL 兼容性测试](https://github.com/vobichngan285-collab/-/actions/runs/42561840959)。因此不要宣称云希/晓晓已经修好或认为安装 ZIP 就能发声。**官方基础包也不包含云希/晓晓自然语音资源。**
+
+CI 结果：[Windows 构建通过](https://github.com/vobichngan285-collab/-/actions/runs/42556569339)，22 项单元测试通过；独立辅助程序使用 CI 自建模拟 DLL 成功完成音色发现、合成 9600 字节 24kHz PCM、并从真正冻结打包的 EXE 接收 PCM；模拟 DLL 只用于 CI，未放入用户软件。真实广荣 DLL 通过同样的接口**没有初始化成功**。此前给用户的 PyInstallerImportError 表述不正确，V1.6 已将错误归类交给原生进程处理。
+
+V1.6 软件内仍保留「一键准备独立广荣 TTS」，首次需要联网下载作者原版发行包到本软件独立目录，以后不需要联网；若其独立 DLL 不允许初始化，显示具体失败信息，Windows 系统语音依旧可用。请不要为此更改保益悦听设置，也不必重复提交 OCR 或语音诊断。
+
+---
+
 # 游戏文字助手 V1.6 · 广荣独立语音兼容性测试版（2026-11-09）
 
 **[获取 V1.6 Windows x64 免安装包](https://github.com/vobichngan285-collab/-/actions/runs/42556569339/artifacts/13647478200)**；GitHub Actions 成功，22 项单元测试通过。GitHub 的 artifact 有时外面再包一层 ZIP；解压后运行 `GameTextReader/GameTextReader.exe`。
