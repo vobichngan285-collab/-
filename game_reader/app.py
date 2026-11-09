@@ -703,6 +703,20 @@ class ReaderApp:
                         pass
                     self.status("识别失败。点击“复制失败诊断”查看错误。")
                     self.update_output("识别失败。")
+                elif kind == "hover_ok":
+                    _, generation, lines, manual, milliseconds = event
+                    self._handle_hover_result(generation, lines, manual, milliseconds)
+                elif kind == "hover_fail":
+                    _, generation, detail = event
+                    self.hover_ocr_busy = False
+                    self._hover_next_due = (time.monotonic() +
+                                            max(1.0, self.settings["period_ms"] / 1000.0))
+                    if self.pending_full_capture:
+                        self.pending_full_capture = False
+                        self.capture()
+                    elif generation == self.mode_generation and self.mouse_mode == "hover":
+                        self.last_ocr_error = detail
+                        self.status("局部 OCR 失败。点击「复制失败诊断」查看。")
                 elif kind == "voices":
                     _, voices, packages, natural_count, has_config = event
                     self.voices = voices
@@ -741,17 +755,42 @@ class ReaderApp:
         if self.closed:
             return
         try:
-            down = is_key_down(self.settings["vk"])
-            if not self.setting_hotkey and down and not self.key_previous:
-                if self.root.state() == "normal":
-                    self.capture_from_button()
-                else:
-                    self.capture()
-            self.key_previous = down
+            if self.setting_hotkey:
+                self._capture_mouse_hotkey()
+                # Holding a newly recorded side button must not immediately
+                # trigger the just assigned action on the next polling frame.
+                for field in HOTKEY_FIELDS:
+                    self._hotkey_previous[field] = is_key_down(self.settings[field])
+            elif not self._choosing_region:
+                for field in HOTKEY_FIELDS:
+                    vk = self.settings[field]
+                    down = is_key_down(vk)
+                    old = self._hotkey_previous.get(field, down)
+                    self._hotkey_previous[field] = down
+                    if not down or old:
+                        continue
+                    if field == "vk":
+                        if self.root.state() == "normal":
+                            self.capture_from_button()
+                        else:
+                            self.capture()
+                    elif field == "mode_vk":
+                        self.toggle_mouse_mode()
+                    else:
+                        self.start_hover_ocr(manual=True)
 
             if self.expires_at is not None and time.monotonic() >= self.expires_at:
-                self.invalidate("本次 OCR 已满 60 秒：文字、坐标和框已全部删除。")
-            if not self.busy and self.lines:
+                if self.mouse_mode == "pointer":
+                    self.invalidate("本次全屏 OCR 结果已满 60 秒，请重新截图。")
+                else:
+                    # The old pointer cache expires independently of a
+                    # newly spoken hover tooltip. Do not cut off hover audio.
+                    self.lines = []
+                    self.expires_at = None
+
+            if self._choosing_region or self.setting_hotkey:
+                pass
+            elif self.mouse_mode == "pointer" and not self.busy and self.lines:
                 x, y = get_cursor()
                 target = hit_test(self.lines, x, y)
                 if target != self.last_target:
@@ -760,17 +799,24 @@ class ReaderApp:
                     if target is None and self.last_target is not None:
                         self.speech.stop()
                     self.last_target = target
-                # Zero dwell. The first poll entering the region speaks once.
                 to_read = self.hover.update(target, time.monotonic() * 1000)
                 if to_read is not None:
                     self.cues.play("hover")
                     self.speak_selected(to_read.text)
+            elif (self.mouse_mode == "hover" and not self.busy
+                  and time.monotonic() >= self._hover_next_due):
+                self.start_hover_ocr(manual=False)
         except Exception as exc:
-            self.status("鼠标 / 边框监听异常：" + str(exc))
+            self.status("鼠标／快捷键监听异常：" + str(exc))
         self.root.after(20, self.poll_input)
 
     def close(self):
         self.closed = True
+        if self._region_picker is not None:
+            try:
+                self._region_picker.cancel()
+            except tk.TclError:
+                pass
         self.speech.shutdown()
         self.cues.shutdown()
         if self.overlay is not None:
