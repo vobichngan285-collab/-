@@ -109,6 +109,16 @@ def load_guangrong_native(file: Path):
 
 def _guangrong_worker(pipe, path: str):
     """All native vendor calls stay outside the application's process."""
+    def trace_child(stage):
+        # Opt-in CI diagnostics only. No text/voice content logged.
+        out = os.environ.get("GR_NATIVE_DEBUG_FILE")
+        if out:
+            try:
+                with open(out, "a", encoding="utf-8") as stream:
+                    stream.write(stage + "\\n")
+            except OSError:
+                pass
+    trace_child("worker-enter")
     dll = None
     directory_handle = None
     original_dir = None
@@ -125,6 +135,7 @@ def _guangrong_worker(pipe, path: str):
                 pass
 
     try:
+        trace_child("validating-path")
         file = chosen_dll_path(path)
         if file is None:
             emit("error", "未找到广荣 64 位 grtts_x64.dll。请点击“一键安装独立广荣”。")
@@ -133,11 +144,14 @@ def _guangrong_worker(pipe, path: str):
             emit("error", "广荣 Windows DLL 只能在 Windows 上调用。")
             return
 
+        trace_child("before-add-dll-dir")
         directory_handle = os.add_dll_directory(str(file.parent))
         original_dir = os.getcwd()
         # The upstream NVDA DLL may look for .vl / NaturalVoiceS near itself.
         os.chdir(str(file.parent))
+        trace_child("before-native-load")
         dll = load_guangrong_native(file)
+        trace_child("after-native-load")
         prototype = [
             ("YongDe_Initialize", ctypes.c_bool, []),
             ("YongDe_Uninitialize", None, []),
@@ -338,6 +352,7 @@ def _guangrong_worker(pipe, path: str):
                 threading.Thread(target=synthesize, args=(rid, content),
                                  daemon=True, name="GuangrongNativeSynth").start()
     except BaseException as exc:
+        trace_child("caught-" + type(exc).__name__)
         emit("error", "广荣独立引擎：加载或运行错误：" + type(exc).__name__ + ": " + str(exc)[:260])
     finally:
         if dll is not None:
