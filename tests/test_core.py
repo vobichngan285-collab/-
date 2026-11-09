@@ -336,3 +336,10 @@ def test_medium_ocr_metrics_expose_lock_and_load(monkeypatch):
     assert metrics["model_ms"] >= metrics["model_lock_wait_ms"]
     assert metrics["raw_lines"] == 0
     assert metrics["accepted_lines"] == 0
+
+def test_default_medium_experimental_profile():
+    from game_reader.ocr_backend import LocalOCR
+    worker = LocalOCR()
+    assert worker.medium_rec_batch_num == 2
+    assert worker.medium_ort_threads == 2
+    # Small remains unchanged: tests above assert no batch/thread overrides.
