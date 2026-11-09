@@ -1,4 +1,4 @@
-"""Prepare both official PP-OCRv6 tiers with RapidOCR ONNX on the Windows CI runner.
+"""Prepare only the original V1.2 default Small PP-OCRv6 models with RapidOCR ONNX on the Windows CI runner.
 
 Weights are downloaded only on CI and copied to models/. Runtime paths are
 strictly local, and the distributed application must work without networking.
@@ -21,15 +21,15 @@ font = ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", 100)
 draw.text((65, 45), "CONTINUE GAME", fill="black", font=font)
 draw.text((65, 210), "SETTINGS", fill="black", font=font)
 
-for tier in ("small", "medium"):
+for tier in ("small",):
     print(f"[models] Checking ONNX v6 {tier}", flush=True)
     engine = RapidOCR(params={
         "Det.engine_type": EngineType.ONNXRUNTIME,
         "Rec.engine_type": EngineType.ONNXRUNTIME,
         "Det.ocr_version": OCRVersion.PPOCRV6,
         "Rec.ocr_version": OCRVersion.PPOCRV6,
-        "Det.model_type": (ModelType.SMALL if tier == "small" else ModelType.MEDIUM),
-        "Rec.model_type": (ModelType.SMALL if tier == "small" else ModelType.MEDIUM),
+        "Det.model_type": ModelType.SMALL,
+        "Rec.model_type": ModelType.SMALL,
     })
     result = engine(image, use_cls=False)
     found = list(result.txts or [])
@@ -45,4 +45,6 @@ for tier in ("small", "medium"):
         copy2(source, DEST / name)
         print(f"[models] bundled {name}: {(DEST/name).stat().st_size}", flush=True)
 
-print("[models] Four real PP-OCRv6 ONNX models ready", flush=True)
+for unused in ("PP-OCRv6_det_medium.onnx", "PP-OCRv6_rec_medium.onnx"):
+    (DEST / unused).unlink(missing_ok=True)
+print("[models] ONLY V1.2 Small DET+REC models ready", flush=True)
