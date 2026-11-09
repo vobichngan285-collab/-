@@ -58,6 +58,20 @@ jobs:
           path: medium_ocr_ab.json
           if-no-files-found: error
           retention-days: 30
+      - name: A/B Medium ONNX CPU threads auto, 1, 2, 4
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = (Get-Location).Path
+          python tools/benchmark_medium_threads.py
+          if ($LASTEXITCODE -ne 0) { throw 'Medium ONNX CPU threads experiment failed' }
+          if (-not (Test-Path medium_ocr_threads_ab.json)) { throw 'CPU threading A/B report missing' }
+      - name: Upload Medium CPU threading evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameTextReader-V1.7-Medium-CPU-Threads-AB
+          path: medium_ocr_threads_ab.json
+          if-no-files-found: error
+          retention-days: 30
       - name: Inspect BOTH OCR tiers against English and synthetic Chinese menu (source)
         shell: pwsh
         run: |
@@ -196,11 +210,11 @@ jobs:
         run: |
           New-Item -ItemType Directory release -Force | Out-Null
           Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_V1.7_Medium_AB_Windows_x64_Portable.zip -CompressionLevel Optimal -Force
-          $size = (Get-Item release/GameTextReader_V1.6_Windows_x64_Portable.zip).Length
+          $size = (Get-Item release/GameTextReader_V1.7_Medium_AB_Windows_x64_Portable.zip).Length
           Write-Output "Portable archive size: $size bytes"
       - uses: actions/upload-artifact@v4
         with:
           name: GameTextReader-V1.7-Medium-AB-Portable
-          path: release/GameTextReader_V1.6_Windows_x64_Portable.zip
+          path: release/GameTextReader_V1.7_Medium_AB_Windows_x64_Portable.zip
           if-no-files-found: error
           retention-days: 30
