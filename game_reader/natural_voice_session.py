@@ -10,7 +10,7 @@ from .ms_voice_discovery import (discover_natural_voices, choose_natural_voice,
                                  inspect_local_voice_config, load_user_config)
 from .luna_natural_voice import make_ssml
 from .upstream_luna_pipe import OriginalLunaPipe, runtime_directory
-from .luna_voice_worker import VoiceSetupError
+from .natural_voice_errors import VoiceSetupError
 
 
 class NaturalVoiceSession:
