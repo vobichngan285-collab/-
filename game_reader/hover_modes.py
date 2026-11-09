@@ -153,4 +153,4 @@ def cursor_still_near_capture(start: tuple[int, int], current: tuple[int, int],
 
 def exclude_unrelated_desktop_text(foreground_class: str) -> bool:
     """Hover tooltip OCR should never read wallpaper/desktop icons."""
-    return foreground_class in {"Progman", "WorkerW", "Shell_TrayWnd"}
+    return foreground_class in {"Progman", "WorkerW", "Shell_TrayWnd", "CabinetWClass", "ExploreWClass"}
