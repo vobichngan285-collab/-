@@ -19,3 +19,10 @@ def foreground_class() -> str:
     buffer = ctypes.create_unicode_buffer(256)
     n = user32.GetClassNameW(handle, buffer, 256)
     return buffer.value if n > 0 else ""
+
+
+def foreground_window_id() -> int:
+    """Non-sensitive HWND identity, used only to discard stale full-screen OCR."""
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    return int(user32.GetForegroundWindow() or 0)
