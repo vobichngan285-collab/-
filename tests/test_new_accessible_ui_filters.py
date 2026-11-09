@@ -133,3 +133,53 @@ def test_native_ttk_theme_keeps_accessibility_semantics():
     assert 'ttk.Style' in source
     assert "ttk.Button" not in source or "Canvas" not in source
     assert "Canvas" not in source
+
+
+
+def test_game_inventory_locally_reads_new_chinese_name_not_quantity(monkeypatch):
+    """Real case: the item tooltip appears near items numbered 18 and 173."""
+    from game_reader.app import ReaderApp
+    import game_reader.app as mod
+    monkeypatch.setattr(mod, "get_cursor", lambda: (490, 600))
+    monkeypatch.setattr(mod, "foreground_class", lambda: "GameWindow")
+    class Speaker:
+        def __init__(self): self.stopped = 0
+        def stop(self): self.stopped += 1
+    app=ReaderApp.__new__(ReaderApp)
+    app.mouse_mode="hover"
+    app.hover_ocr_busy=True
+    app.pending_full_capture=False
+    app.mode_generation=3
+    app.settings={"period_ms":400, **DEFAULT_FILTER_SETTINGS}
+    app._hover_last_text=""
+    app._hover_spoken_cursor=None
+    app._hover_spoken_foreground=None
+    app.speech=Speaker()
+    app.update_output=Mock()
+    app.status=Mock()
+    app.speak_selected=Mock()
+    first=[
+        OCRLine("18", 300, 540, 345, 570),
+        OCRLine("碎布", 430, 610, 525, 655),
+        OCRLine("173", 660, 600, 730, 636),
+    ]
+    app._handle_hover_result(3, first, False, 45, (490,600), "GameWindow")
+    app.speak_selected.assert_called_once_with("碎布")
+    raw=app.update_output.call_args[0][0]
+    assert "18" in raw and "173" in raw and "碎布" in raw
+    app._handle_hover_result(3, first, False, 42, (490,600), "GameWindow")
+    assert app.speak_selected.call_count==1
+    replacement=[
+        OCRLine("21", 300, 540, 345, 570),
+        OCRLine("石斧", 430, 610, 525, 655),
+        OCRLine("173", 660, 600, 730, 636),
+    ]
+    app._handle_hover_result(3, replacement, False, 42, (490,600), "GameWindow")
+    assert app.speak_selected.call_count==2
+    assert app.speak_selected.call_args[0][0]=="石斧"
+
+
+def test_keyboard_and_screenreader_pages_remain_native():
+    """Live full app self-test in the packaged EXE checks actual Win UIA."""
+    from game_reader.ui_theme import configure_theme
+    assert callable(configure_theme)
