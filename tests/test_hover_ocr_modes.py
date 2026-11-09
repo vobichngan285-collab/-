@@ -146,6 +146,7 @@ def test_hotkey_assignment_refuses_duplicates_and_records_side_button():
                     "mode_vk": 120, "mode_hotkey_label": "F9",
                     "local_vk": 121, "local_hotkey_label": "F10"}
     app._binding_target = "mode_vk"
+    app.mouse_mode = "hover"
     app._hotkey_previous = {}
     app.status_values = []
     app.status = app.status_values.append
