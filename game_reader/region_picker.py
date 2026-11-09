@@ -48,12 +48,12 @@ class ScreenRegionPicker(tk.Toplevel):
 
         self.canvas.create_text(
             self._width // 2, 28,
-            text="十字表示游戏中鼠标的位置｜按住鼠标左键拖动框选要读取的弹窗范围｜Esc 取消",
+            text="十字表示游戏中鼠标的位置｜按住鼠标左键拖动设置扫描范围的宽高｜Esc 取消",
             fill="white", font=("Microsoft YaHei UI", 13, "bold"),
             tags="hint")
         self.canvas.create_text(
             self._width // 2, 56,
-            text="框选位置与十字的距离会保存，运行时整个 OCR 区域跟随鼠标移动",
+            text="本版只保存框选宽高，实际扫描始终以鼠标为中心，不保留选区偏移",
             fill="#9fdefa", font=("Microsoft YaHei UI", 10), tags="hint")
 
         ax, ay = self._anchor
@@ -63,7 +63,7 @@ class ScreenRegionPicker(tk.Toplevel):
                                 fill="#fbfbfb", width=2, tags="anchor")
         self.canvas.create_oval(ax - 3, ay - 3, ax + 3, ay + 3,
                                 outline="#50d5ff", width=2, tags="anchor")
-        self.canvas.create_text(ax + 10, ay + 28, text="鼠标基准点",
+        self.canvas.create_text(ax + 10, ay + 28, text="鼠标扫描中心",
                                 fill="#fbfbfb", anchor="nw", tags="anchor")
         self._draw_rectangle(ax + initial.x, ay + initial.y,
                              ax + initial.x + initial.width,
