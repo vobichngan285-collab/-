@@ -112,9 +112,10 @@ struct Engine {
         module = LoadLibraryExW(dll.c_str(), nullptr,
                                LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR |
                                LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+        DWORD load_error = module ? ERROR_SUCCESS : GetLastError();
         debug_stage("native-after-load-library-ex");
         if (!module) {
-            send_line("ERROR\t" + std::to_string(GetLastError()) +
+            send_line("ERROR\t" + std::to_string(load_error) +
                       "\tWindows DLL loader rejected the publisher engine");
             return false;
         }
