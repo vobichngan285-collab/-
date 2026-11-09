@@ -85,8 +85,13 @@ def process_request(request: dict, synthesize=synthesize_with_installed_voice) -
 
 def main() -> int:
     try:
-        line = sys.stdin.readline(MAX_TEXT * 4 + 12000)
-        request = json.loads(line)
+        # The GUI sends UTF-8 JSON via subprocess.Popen(encoding="utf-8").
+        # A frozen --windowed EXE on Windows may default sys.stdin to a
+        # legacy code page (e.g. cp1252). Text readline() silently mangles
+        # Chinese characters in local paths, turning real files into
+        # "not found". Decode bytes explicitly with the SAME UTF-8 codec.
+        raw = sys.stdin.buffer.readline(MAX_TEXT * 4 + 12000)
+        request = json.loads(raw.decode("utf-8-sig"))
         reply = process_request(request)
     except (ValueError, TypeError, json.JSONDecodeError):
         reply = {"ok": False, "stage": "request", "code": "invalid_request_json"}
