@@ -981,10 +981,8 @@ class ReaderApp:
             cursor = get_cursor()
             captured_window = foreground_class()
             monitor = monitor_rect_at_cursor()
-            # A previous F11 selection may have been off-centre; the new
-            # experiment ignores its offset and only preserves width/height.
-            relative = centered_region(
-                RelativeRegion.from_settings(self.settings["region"]))
+            # Preserve mouse-relative x/y offset chosen with F11.
+            relative = RelativeRegion.from_settings(self.settings["region"])
             box = capture_box(relative, cursor, monitor)
         except Exception as exc:
             self.status("局部 OCR 截图区域错误：" + type(exc).__name__)
@@ -997,13 +995,16 @@ class ReaderApp:
         def work():
             started = time.monotonic()
             try:
-                image = ImageGrab.grab(bbox=box, all_screens=True).convert("RGB")
+                image = ImageGrab.grab(bbox=box, all_screens=True)
+                capture_ms = round((time.monotonic() - started) * 1000)
                 if image.size != (box[2] - box[0], box[3] - box[1]):
                     raise RuntimeError("局部截图尺寸与显示器范围不一致")
-                lines = self.ocr_worker.recognize(image, box[:2], "small")
+                with self._ocr_lock:
+                    lines = self.ocr_worker.recognize(image, box[:2], "small")
+                infer_ms = round((time.monotonic() - started) * 1000) - capture_ms
                 self.events.put(("hover_ok", generation, lines, manual,
                                  round((time.monotonic() - started) * 1000),
-                                 cursor, captured_window))
+                                 cursor, captured_window, (capture_ms, infer_ms)))
             except Exception:
                 self.events.put(("hover_fail", generation,
                                  traceback.format_exc()))
@@ -1012,9 +1013,13 @@ class ReaderApp:
 
     def _handle_hover_result(self, generation: int, lines: list[OCRLine],
                              manual: bool, elapsed: int,
-                             capture_cursor=None, capture_foreground=None):
+                             capture_cursor=None, capture_foreground=None,
+                             timings=None):
         self.hover_ocr_busy = False
-        self._hover_next_due = time.monotonic() + self.settings["period_ms"] / 1000.0
+        # Start-to-start interval: slow inference should not add another full
+        # period before a fresh scan. 60ms prevents a tight CPU spin.
+        self._hover_next_due = max(getattr(self, "_hover_next_due", 0.0),
+                                   time.monotonic() + 0.06)
         if self.pending_full_capture:
             self.pending_full_capture = False
             self.capture()
@@ -1052,13 +1057,18 @@ class ReaderApp:
             self._hover_spoken_cursor = capture_cursor
             self._hover_spoken_foreground = capture_foreground
             self.speak_selected(speech_text[:1900])
+            timing_note = (f"（截图 {timings[0]} / 推理 {timings[1]} 毫秒）"
+                           if timings is not None else "")
             self.status(f"局部 OCR 扫描 {len(lines)} 行，"
-                        f"{elapsed} 毫秒；"
+                        f"{elapsed} 毫秒{timing_note}；"
                         + ("手动重新朗读。" if manual else "新文字已朗读。"))
 
     def invalidate(self, reason: str):
         """Actually erase all text, coordinates, hover state and audio."""
         self.capture_id += 1
+        self.mode_generation += 1  # Stale hover OCR must not revive erased text.
+        self.pending_full_capture = False
+        self._hover_last_text = ""
         self.expires_at = None
         self.lines = []
         self._full_capture_window = None
@@ -1071,6 +1081,10 @@ class ReaderApp:
             self.overlay.hide()
         self.update_output("")
         self.status(reason)
+
+    def clear_results(self):
+        """Immediate manual clear; 60-second automatic expiry remains active."""
+        self.invalidate("已手动清空识别结果和朗读；可重新截图。")
 
     def capture_from_button(self):
         self.root.iconify()
@@ -1100,7 +1114,8 @@ class ReaderApp:
                 focus = foreground_window_id()
                 image, origin = grab_current_monitor()
                 phase = f"离线OCR推理（{tier}）"
-                lines = self.ocr_worker.recognize(image, origin, tier)
+                with self._ocr_lock:
+                    lines = self.ocr_worker.recognize(image, origin, tier)
                 self.events.put(("ocr_ok", capture_id, lines,
                                  round((time.monotonic() - started) * 1000),
                                  focus))
@@ -1116,11 +1131,13 @@ class ReaderApp:
                 event = self.events.get_nowait()
                 kind = event[0]
                 if kind == "ocr_ok":
-                    _, capture_id, lines, milliseconds, focus = event
-                    self.busy = False
-                    self.read_btn.configure(state="normal")
+                    _, capture_id, lines, milliseconds, focus, *extra = event
                     if capture_id != self.capture_id:
                         continue
+                    self.busy = False
+                    self.read_btn.configure(state="normal")
+                    source = extra[0] if extra else "fullscreen"
+                    timings = extra[1] if len(extra) > 1 else None
                     self.lines = build_reading_regions(lines)
                     self._full_capture_window = focus
                     self.hover.reset()
@@ -1128,15 +1145,26 @@ class ReaderApp:
                     self.update_output("\n".join(region.text for region in self.lines))
                     if self.lines:
                         self.expires_at = time.monotonic() + RESULT_TTL_SECONDS
+                    timing_note = (f"（截图 {timings[0]} / 推理 {timings[1]} 毫秒）"
+                                   if timings is not None else "")
                     self.status(f"识别完成：{len(self.lines)} 个朗读区域；"
-                                f"耗时 {milliseconds} 毫秒。60 秒后自动清空。")
-                    self.cues.play("complete")
+                                f"耗时 {milliseconds} 毫秒{timing_note}。"
+                                "60 秒后自动清空。")
+                    if (self.lines and self.mouse_mode == "pointer"
+                            and self.settings.get("success_cue", True)):
+                        self.cues.play("complete")
+                    if source == "selection" and self.mouse_mode == "hover":
+                        spoken = filter_speech_text(
+                            "\n".join(line.text for line in self.lines), self.settings)
+                        if spoken:
+                            self.speech.stop()
+                            self.speak_selected(spoken[:1900])
                 elif kind == "ocr_fail":
                     _, capture_id, detail = event
-                    self.busy = False
-                    self.read_btn.configure(state="normal")
                     if capture_id != self.capture_id:
                         continue
+                    self.busy = False
+                    self.read_btn.configure(state="normal")
                     self.last_ocr_error = detail
                     try:
                         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -1146,9 +1174,10 @@ class ReaderApp:
                     self.status("识别失败。点击“复制失败诊断”查看错误。")
                     self.update_output("识别失败。")
                 elif kind == "hover_ok":
-                    _, generation, lines, manual, milliseconds, location, window_class = event
+                    _, generation, lines, manual, milliseconds, location, window_class, *extra = event
                     self._handle_hover_result(generation, lines, manual, milliseconds,
-                                              location, window_class)
+                                              location, window_class,
+                                              extra[0] if extra else None)
                 elif kind == "hover_fail":
                     _, generation, detail = event
                     self.hover_ocr_busy = False
@@ -1213,8 +1242,7 @@ class ReaderApp:
         try:
             cursor = get_cursor()
             monitor = monitor_rect_at_cursor()
-            region = centered_region(
-                RelativeRegion.from_settings(self.settings["region"]))
+            region = RelativeRegion.from_settings(self.settings["region"])
             left, top, right, bottom = capture_box(region, cursor, monitor)
             self.scan_frame.show(
                 OCRLine("扫描框", left, top, right, bottom))
@@ -1250,6 +1278,8 @@ class ReaderApp:
                         self.start_hover_ocr(manual=True)
                     elif field == "pick_vk":
                         self.select_region()
+                    elif field == "clear_vk":
+                        self.clear_results()
 
             if self.expires_at is not None and time.monotonic() >= self.expires_at:
                 if self.mouse_mode == "pointer":
@@ -1280,10 +1310,10 @@ class ReaderApp:
                         self.last_target = target
                     to_read = self.hover.update(target, time.monotonic() * 1000)
                     if to_read is not None:
-                        self.cues.play("hover")
                         spoken = filter_speech_text(to_read.text, self.settings)
-                    if spoken:
-                        self.speak_selected(spoken)
+                        if spoken:
+                            self.cues.play("hover")
+                            self.speak_selected(spoken)
             elif self.mouse_mode == "hover":
                 self.update_scan_frame()
                 if self._hover_spoken_cursor is not None:
