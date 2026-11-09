@@ -434,6 +434,12 @@ class ReaderApp:
             self.status("无法获取显示器尺寸：" + type(exc).__name__)
             return
         self._choosing_region = True
+        # Cancel old queued OCR/audio before putting the selection overlay
+        # on screen. Any image already being processed must be discarded.
+        self.mode_generation += 1
+        self._hover_last_text = ""
+        self._hover_spoken_cursor = None
+        self.speech.stop()
         self._region_previous_root_state = self.root.state()
         try:
             self.root.deiconify()
