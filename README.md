@@ -1,3 +1,16 @@
+# 游戏文字助手 V1.6 · 广荣独立语音兼容性测试版（2026-11-09）
+
+**[获取 V1.6 Windows x64 免安装包](https://github.com/vobichngan285-collab/-/actions/runs/42556569339/artifacts/13647478200)**；GitHub Actions 成功，22 项单元测试通过。GitHub 的 artifact 有时外面再包一层 ZIP；解压后运行 `GameTextReader/GameTextReader.exe`。
+
+**本版仅修复广荣语音接入链路，不改动 OCR 档位参数。** 之前在 V1.5 中，PyInstaller 打包后的 Python 进程加载广荣 x64 DLL 会报错误或卡住。本次添加自研独立 `GuangrongHost.exe`，由其负责本地原生加载、语音枚举、PCM 合成和向主程序传输音频。原有「一键准备独立广荣 TTS」入口保留，官方资源仍需用户首次主动下载。整个链路不占用或控制保益悦听读屏通道。
+
+**测试成功范围：** 独立 Windows C++ 程序编译成功，模拟 DLL 返回1个语音、生成9600字节24kHz PCM；冻结 EXE→原生辅助程序→模拟 DLL→PCM 的完整链路成功；Windows CI共22个单元测试、双档 OCR 冒烟测试、无障碍和 UIA 冒烟测试均通过。
+
+**尚未成功的关键范围：** 使用广荣作者**未经修改**的真实 `grtts_x64.dll`，在干净 Windows CI 上通过原生程序依然报 `ERROR 1114`（DLL 初始化例程失败），没有实际声音输出；[真实组件验证日志](https://github.com/vobichngan285-collab/-/actions/runs/42561840959)。**因此不能说广荣微软自然语音已修复。** 用户 Windows 系统如能独立加载，可通过语音下拉框和试听验证；如果不能，当前包可能同样报告1114。真实的云希/晓晓自然语音不包含在基础发布包内。
+
+第二档 Medium 超过10秒、边角漏字和 OCR 返回不全**不在本次修复范围内**。
+
+---
 # V1.5 独立广荣 TTS 兼容性实验版 · 2026-11-09
 
 本项目 Windows 11 x64、完全离线 OCR，免安装 ZIP（不需要安装保益悦听、NVDA 或另外寻找 DLL）。
