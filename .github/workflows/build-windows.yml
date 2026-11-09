@@ -86,6 +86,13 @@ jobs:
               Write-Output "Removed redundant weight: $name"
             }
           }
+          # All OCR calls use use_cls=False. PyInstaller also collects an
+          # unused old angle-classification model; do not ship dead weights.
+          $unusedCls = @(Get-ChildItem dist/GameTextReader/_internal/rapidocr -Recurse -Filter '*cls*.onnx' -ErrorAction SilentlyContinue)
+          foreach ($file in $unusedCls) {
+            Remove-Item $file.FullName -Force
+            Write-Output "Removed unused angle classifier: $($file.Name)"
+          }
       - name: Verify bundled models
         shell: pwsh
         run: |
