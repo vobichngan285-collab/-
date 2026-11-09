@@ -68,6 +68,45 @@ def find_known_installed_guangrong() -> str:
     return ""
 
 
+def load_guangrong_native(file: Path):
+    """Load the isolated x64 vendor DLL via Windows' native loader.
+
+    Avoid PyInstaller's ctypes library hook; frozen apps preload their own
+    _internal DLL search directory, which can shadow external codec libraries.
+    Only the dedicated vendor subprocess has its DLL search path reset.
+    """
+    if sys.platform != "win32":
+        raise RuntimeError("广荣独立 DLL 仅支持 Windows")
+    if not file.is_file() or file.name.lower() != "grtts_x64.dll":
+        raise FileNotFoundError("缺少官方广荣 x64 原始运行库")
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.SetDllDirectoryW.argtypes = [ctypes.c_wchar_p]
+    kernel.SetDllDirectoryW.restype = ctypes.c_bool
+    kernel.SetDllDirectoryW(None)  # restore ordinary Windows search in child
+    kernel.LoadLibraryExW.argtypes = [ctypes.c_wchar_p, ctypes.c_void_p, ctypes.c_uint]
+    kernel.LoadLibraryExW.restype = ctypes.c_void_p
+    # LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS;
+    # vendor dependencies are searched in the vendor's own directory first.
+    handle = kernel.LoadLibraryExW(str(file), None, 0x00000100 | 0x00001000)
+    if not handle:
+        error = ctypes.get_last_error()
+        reasons = {
+            1114: "广荣官方 x64 DLL 初始化例程失败，可能不支持脱离原宿主软件运行",
+            126: "广荣官方 DLL 的依赖文件不完整",
+            193: "广荣 DLL 与进程位数或某个依赖 DLL 的位数不一致",
+        }
+        desc = reasons.get(error, "Windows 原生加载器未能加载广荣语音引擎")
+        raise RuntimeError(f"{desc} [WinError {error}]")
+    try:
+        # Use the already-open native handle rather than PyInstaller's patched
+        # ctypes.CDLL(path) behavior. The caller keeps this object alive.
+        return ctypes.CDLL(str(file), handle=handle)
+    except BaseException:
+        kernel.FreeLibrary.argtypes = [ctypes.c_void_p]
+        kernel.FreeLibrary(handle)
+        raise
+
+
 def _guangrong_worker(pipe, path: str):
     """All native vendor calls stay outside the application's process."""
     dll = None
@@ -98,7 +137,7 @@ def _guangrong_worker(pipe, path: str):
         original_dir = os.getcwd()
         # The upstream NVDA DLL may look for .vl / NaturalVoiceS near itself.
         os.chdir(str(file.parent))
-        dll = ctypes.CDLL(str(file))
+        dll = load_guangrong_native(file)
         prototype = [
             ("YongDe_Initialize", ctypes.c_bool, []),
             ("YongDe_Uninitialize", None, []),
@@ -299,7 +338,7 @@ def _guangrong_worker(pipe, path: str):
                 threading.Thread(target=synthesize, args=(rid, content),
                                  daemon=True, name="GuangrongNativeSynth").start()
     except BaseException as exc:
-        emit("error", "广荣 DLL 运行环境错误：" + type(exc).__name__ + ": " + str(exc)[:220])
+        emit("error", "广荣独立引擎：加载或运行错误：" + type(exc).__name__ + ": " + str(exc)[:260])
     finally:
         if dll is not None:
             try:
