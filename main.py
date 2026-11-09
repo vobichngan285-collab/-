@@ -209,41 +209,33 @@ def packaged_app_selftest() -> int:
 
 
 def packaged_guangrong_loader_selftest() -> int:
-    """Exercise the frozen EXE's own spawned child and native DLL error path.
+    """Execute the frozen EXE's *real* native helper with a CI-supplied fake DLL.
 
-    This uses an intentionally invalid PE stub, NOT the publisher's package.
-    A PASS proves PyInstaller doesn't shadow the external file. It does NOT
-    prove real Microsoft natural voices work or have been installed.
+    CI builds the fake DLL outside the portable package. No vendor binary is
+    required, and this is not proof that Guangrong's real DLL can initialize.
     """
     from pathlib import Path
-    from tempfile import TemporaryDirectory, gettempdir
+    from tempfile import gettempdir
     import traceback
+    import os
     output = Path(gettempdir()) / "GameTextReader_guangrong_loader_selftest.txt"
     try:
         from game_reader.guangrong_tts import list_guangrong_voices
-        import os
-        with TemporaryDirectory(prefix="grtts-frozen-probe-") as d:
-            invalid = Path(d) / "grtts_x64.dll"
-            trace = Path(d) / "child-trace.txt"
-            invalid.write_bytes(b"This is deliberately not a real DLL")
-            os.environ["GR_NATIVE_DEBUG_FILE"] = str(trace)
-            try:
-                voices, error = list_guangrong_voices(str(invalid), timeout=15)
-            finally:
-                os.environ.pop("GR_NATIVE_DEBUG_FILE", None)
-            trace_text = trace.read_text(encoding="utf-8") if trace.exists() else "<NO CHILD TRACE>"
-            if voices:
-                raise AssertionError("Invalid vendor library unexpectedly returned voices")
-            if "WinError 193" not in error:
-                raise AssertionError("Expected native error, got: " + error
-                                     + "\\nChild stages: " + trace_text)
-            if "PyInstallerImportError" in error:
-                raise AssertionError("PyInstaller hook still intercepted call")
-
-        output.write_text("PASS\nFrozen child native loader returned WinError 193 without confusing PyInstaller errors", encoding="utf-8")
+        testing_dll = os.environ.get("GR_CI_FAKE_DLL_PATH", "")
+        if not testing_dll or not Path(testing_dll).is_file():
+            raise RuntimeError("CI must supply independent fake Guangrong DLL")
+        voices, error = list_guangrong_voices(testing_dll, timeout=9)
+        if error:
+            raise AssertionError("Frozen native host could not load CI test DLL: " + error)
+        if voices != ["Native Host Test Voice"]:
+            raise AssertionError("Frozen native host fake voice enumeration mismatch: "
+                                 + repr(voices))
+        output.write_text(
+            "PASS\\nFrozen EXE -> native host -> fake Guangrong DLL enumerated 1 voice", 
+            encoding="utf-8")
         return 0
     except BaseException:
-        output.write_text("FAIL\n" + traceback.format_exc(), encoding="utf-8")
+        output.write_text("FAIL\\n" + traceback.format_exc(), encoding="utf-8")
         return 1
 
 
