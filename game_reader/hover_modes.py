@@ -12,9 +12,9 @@ VK_XBUTTON1 = 0x05
 VK_XBUTTON2 = 0x06
 MOUSE_SIDE_VKS = (VK_XBUTTON1, VK_XBUTTON2)
 MODIFIER_VKS = (0x10, 0x11, 0x12, 0x5B, 0x5C)
-HOTKEY_FIELDS = ("vk", "mode_vk", "local_vk", "pick_vk")
-HOTKEY_LABELS = ("hotkey_label", "mode_hotkey_label", "local_hotkey_label", "pick_hotkey_label")
-HOTKEY_DEFAULTS = (0x77, 0x78, 0x79, 0x7A)  # F8 / F9 / F10 / F11
+HOTKEY_FIELDS = ("vk", "mode_vk", "local_vk", "pick_vk", "clear_vk")
+HOTKEY_LABELS = ("hotkey_label", "mode_hotkey_label", "local_hotkey_label", "pick_hotkey_label", "clear_hotkey_label")
+HOTKEY_DEFAULTS = (0x77, 0x78, 0x79, 0x7A, 0x75)  # F8 / F9 / F10 / F11 / F6
 DEFAULT_REGION = (-300, -140, 600, 400)
 MIN_PERIOD_MS = 100
 MAX_PERIOD_MS = 60000
@@ -63,8 +63,8 @@ def sanitize_hotkeys(config: dict) -> dict:
         label = config.get(label_field)
         if (repaired or vk in MOUSE_SIDE_VKS or
                 not isinstance(label, str) or not label or
-                (label in ("F8", "F9", "F10", "F11") and
-                 vk != {"F8": 0x77, "F9": 0x78, "F10": 0x79, "F11": 0x7A}[label])):
+                (label in ("F8", "F9", "F10", "F11", "F6") and
+                 vk != {"F8": 0x77, "F9": 0x78, "F10": 0x79, "F11": 0x7A, "F6": 0x75}[label])):
             config[label_field] = hotkey_label(vk)
         reserved.add(vk)
     return config
