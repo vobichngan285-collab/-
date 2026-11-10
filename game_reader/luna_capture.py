@@ -138,13 +138,16 @@ def _gdi_window_box(hwnd: int, box):
         user32.ReleaseDC(handle, source)
 
 
-def capture_rect(box, hwnd=0):
+def capture_rect(box, hwnd=0, report=None):
     """Capture absolute desktop coordinates; keep screenshot and origin 1:1.
 
     A failed window GDI capture must not be treated as a successful OCR image.
     The fallback is our original full-monitor ImageGrab path.
     """
     box = tuple(map(int, box))
+    if report is not None:
+        report["method"] = "desktop"
+        report["bound_hwnd"] = bool(hwnd)
     if box[2] <= box[0] or box[3] <= box[1]:
         raise ValueError("Invalid screen rectangle")
     if hwnd:
@@ -152,6 +155,8 @@ def capture_rect(box, hwnd=0):
             image = _gdi_window_box(int(hwnd), box)
             if image is not None and image.size == (
                     box[2] - box[0], box[3] - box[1]):
+                if report is not None:
+                    report["method"] = "window_gdi"
                 return image
         except (OSError, ValueError, ctypes.ArgumentError):
             pass
