@@ -1348,7 +1348,7 @@ class ReaderApp:
             if manual and self.mouse_mode != "hover":
                 self.status("请先用模式快捷键切换到鼠标悬停 OCR。")
             return False
-        if self.busy or self.hover_ocr_busy or self.pending_full_capture:
+        if self.busy or self.hover_ocr_busy or getattr(self, "region_ocr_busy", False) or self.pending_full_capture:
             if manual:
                 self.status("OCR 正在处理上一张图；本次不排队。")
             return False
@@ -1456,6 +1456,8 @@ class ReaderApp:
         self.mode_generation += 1  # Stale hover OCR must not revive erased text.
         self.pending_full_capture = False
         self._hover_last_text = ""
+        self._region_last_text = ""
+        self._region_prev_lines = []
         self.expires_at = None
         self.lines = []
         self._full_capture_window = None
@@ -1480,7 +1482,7 @@ class ReaderApp:
         self.root.after(250, self.capture)
 
     def capture(self):
-        if self.hover_ocr_busy:
+        if self.hover_ocr_busy or self.region_ocr_busy:
             # A manual full-screen hotkey takes precedence over periodic OCR.
             # Keep at most one pending full capture and never share an active
             # RapidOCR instance across simultaneous worker threads.
@@ -1573,6 +1575,21 @@ class ReaderApp:
                     self._handle_hover_result(generation, lines, manual, milliseconds,
                                               location, window_class,
                                               extra[0] if extra else None)
+                elif kind == "region_ok":
+                    _, generation, job, lines, signature, elapsed, focus, timings, forced = event
+                    self._handle_region_result(generation, job, lines, signature,
+                                               elapsed, focus, timings, forced)
+                elif kind == "region_fail":
+                    _, generation, job, detail = event
+                    if job == self._region_job_id:
+                        self.region_ocr_busy = False
+                        self._region_next_due = time.monotonic() + 1.0
+                        if self.pending_full_capture:
+                            self.pending_full_capture = False
+                            self.capture()
+                        elif generation == self.mode_generation and self.mouse_mode == "region":
+                            self.last_ocr_error = detail
+                            self.status("固定区域 OCR 失败；下一轮将重试，详细信息可复制。")
                 elif kind == "hover_fail":
                     _, generation, detail = event
                     self.hover_ocr_busy = False
@@ -1624,27 +1641,39 @@ class ReaderApp:
         self.root.after(40, self.poll_messages)
 
     def update_scan_frame(self):
-        """Show the REAL cursor-centred capture rectangle, without stealing focus.
-
-        Four small native transparent border windows remain OUTSIDE the
-        captured pixels, so the green guide cannot contaminate OCR.
-        """
-        if self.scan_frame is None:
+        """Render only active mode's outline; no OCR work or mouse capture."""
+        moving = getattr(self, "scan_frame", None)
+        fixed = getattr(self, "fixed_frame", None)
+        if moving is None and fixed is None:
             return
-        if (self._choosing_region or self.setting_hotkey
-                or self.root.state() == "normal"
-                or not self.settings.get("show_scan_frame", True)):
-            self.scan_frame.hide()
+        blocked = (self._choosing_region or self.setting_hotkey
+                   or self.root.state() == "normal")
+        if self.mouse_mode == "region" and not blocked:
+            if moving is not None:
+                moving.hide()
+            if fixed is not None:
+                box = self._fixed_region_box()
+                if self._region_border_visible and box is not None:
+                    fixed.show(OCRLine("固定区域", *box))
+                else:
+                    fixed.hide()
+            return
+        if fixed is not None:
+            fixed.hide()
+        if moving is None:
+            return
+        if (blocked or self.mouse_mode != "hover" or
+                not self.settings.get("show_scan_frame", True)):
+            moving.hide()
             return
         try:
             cursor = get_cursor()
             monitor = monitor_rect_at_cursor()
             region = RelativeRegion.from_settings(self.settings["region"])
             left, top, right, bottom = capture_box(region, cursor, monitor)
-            self.scan_frame.show(
-                OCRLine("扫描框", left, top, right, bottom))
+            moving.show(OCRLine("扫描框", left, top, right, bottom))
         except Exception:
-            self.scan_frame.hide()
+            moving.hide()
 
     def poll_input(self):
         if self.closed:
@@ -1658,7 +1687,7 @@ class ReaderApp:
                     self._hotkey_previous[field] = is_key_down(self.settings[field])
             elif not self._choosing_region:
                 for field in HOTKEY_FIELDS:
-                    vk = self.settings[field]
+                    vk = self.settings.get(field, 0x76 if field == "frame_vk" else 0)
                     down = is_key_down(vk)
                     old = self._hotkey_previous.get(field, down)
                     self._hotkey_previous[field] = down
@@ -1677,6 +1706,8 @@ class ReaderApp:
                         self.select_region()
                     elif field == "clear_vk":
                         self.clear_results()
+                    elif field == "frame_vk":
+                        self.toggle_region_border()
 
             if self.expires_at is not None and time.monotonic() >= self.expires_at:
                 if self.mouse_mode == "pointer":
@@ -1701,7 +1732,7 @@ class ReaderApp:
                     target = hit_test(self.lines, x, y)
                     if target != self.last_target:
                         if self.overlay is not None:
-                            self.overlay.show(target)
+                            self.overlay.show(target if self.settings.get("show_scan_frame", True) else None)
                         if self.last_target is not None and target is None:
                             self.speech.stop()  # Leaving text stops playback.
                         self.last_target = target
@@ -1726,6 +1757,12 @@ class ReaderApp:
                 if (not self.busy and time.monotonic() >= self._hover_next_due
                         and time.monotonic() >= self._mode_announcement_until):
                     self.start_hover_ocr(manual=False)
+            elif self.mouse_mode == "region":
+                self.update_scan_frame()
+                if (not self.busy and not self.region_ocr_busy
+                        and time.monotonic() >= self._region_next_due
+                        and time.monotonic() >= self._mode_announcement_until):
+                    self.start_region_scan()
         except Exception as exc:
             self.status("鼠标／快捷键监听异常：" + str(exc))
         self.root.after(20, self.poll_input)
@@ -1741,6 +1778,8 @@ class ReaderApp:
         self.cues.shutdown()
         if getattr(self, "scan_frame", None) is not None:
             self.scan_frame.close()
+        if getattr(self, "fixed_frame", None) is not None:
+            self.fixed_frame.close()
         if self.overlay is not None:
             self.overlay.close()
         self.root.destroy()
