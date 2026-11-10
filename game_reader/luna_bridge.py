@@ -8,6 +8,7 @@ no key or private model is bundled or logged.
 from __future__ import annotations
 
 import base64
+from collections import OrderedDict
 import json
 from pathlib import Path
 from queue import Empty, Queue
@@ -36,6 +37,10 @@ class LunaNaturalBridge:
         self._proc = None
         self._replies = None
         self._wav_path = None
+        # Short game labels are frequently revisited while moving the mouse.
+        # Keep only a small, expiring RAM cache; never persist text or WAV.
+        self._wave_cache = OrderedDict()
+        self._wave_cache_bytes = 0
         self._thread = threading.Thread(
             target=self._run, daemon=True, name="PersistentLunaNaturalVoice")
         self._thread.start()
@@ -60,6 +65,40 @@ class LunaNaturalBridge:
             if not self._closing:
                 self._warmup_requested = True
                 self._condition.notify()
+
+    def clear_cache(self):
+        """Erase any cached OCR speech when OCR results are cleared or expire."""
+        with self._condition:
+            self._wave_cache.clear()
+            self._wave_cache_bytes = 0
+
+    def _cache_read(self, key):
+        if key is None:
+            return None
+        with self._condition:
+            item = self._wave_cache.get(key)
+            if item is None:
+                return None
+            wav, at = item
+            if time.monotonic() - at > 60:
+                self._wave_cache_bytes -= len(wav)
+                del self._wave_cache[key]
+                return None
+            self._wave_cache.move_to_end(key)
+            return wav
+
+    def _cache_save(self, key, wav):
+        if key is None or len(wav) > 512 * 1024:
+            return
+        with self._condition:
+            old = self._wave_cache.pop(key, None)
+            if old is not None:
+                self._wave_cache_bytes -= len(old[0])
+            self._wave_cache[key] = (wav, time.monotonic())
+            self._wave_cache_bytes += len(wav)
+            while len(self._wave_cache) > 16 or self._wave_cache_bytes > 4 * 1024 * 1024:
+                _, (removed, _) = self._wave_cache.popitem(last=False)
+                self._wave_cache_bytes -= len(removed)
 
     def _stop_audio_locked(self):
         if sys.platform == "win32":
@@ -201,20 +240,28 @@ class LunaNaturalBridge:
                     if pending is None:
                         continue
                     generation, text, rate, requested_at = pending
-                    response = self._request({"command": "speak", "config_path": config,
-                                               "voice_id": voice, "text": text, "rate": rate})
-                    with self._condition:
-                        if generation != self._generation or self._closing:
-                            continue
-                    if not response.get("ok"):
-                        raise RuntimeError("stage=" + str(response.get("stage", "unknown")) +
-                                           "; code=" + str(response.get("code", "unknown"))[:90])
-                    wav = base64.b64decode(response["wav"], validate=True)
-                    if (len(wav) > 16 * 1024 * 1024 or
-                            wav[:4] != b"RIFF" or wav[8:12] != b"WAVE"):
-                        raise ValueError("语音进程没有返回有效 WAV")
+                    # Only short labels are cached. Long passages and private
+                    # input never become an unbounded transcript/audio store.
+                    key = (text, rate) if 0 < len(text) <= 100 else None
+                    wav = self._cache_read(key)
+                    cache_hit = wav is not None
+                    if not cache_hit:
+                        response = self._request({"command": "speak", "config_path": config,
+                                                   "voice_id": voice, "text": text, "rate": rate})
+                        with self._condition:
+                            if generation != self._generation or self._closing:
+                                continue
+                        if not response.get("ok"):
+                            raise RuntimeError("stage=" + str(response.get("stage", "unknown")) +
+                                               "; code=" + str(response.get("code", "unknown"))[:90])
+                        wav = base64.b64decode(response["wav"], validate=True)
+                        if (len(wav) > 16 * 1024 * 1024 or
+                                wav[:4] != b"RIFF" or wav[8:12] != b"WAVE"):
+                            raise ValueError("语音进程没有返回有效 WAV")
+                        self._cache_save(key, wav)
                     if self._play_if_current(generation, wav) and self.on_event:
-                        self.on_event(f"自然语音请求到播放启动 {int((time.perf_counter()-requested_at)*1000)}ms")
+                        stage = "短文本缓存到播放" if cache_hit else "自然语音请求到播放启动"
+                        self.on_event(f"{stage} {int((time.perf_counter()-requested_at)*1000)}ms")
                 except Exception as exc:
                     self._drop_process()
                     with self._condition:
@@ -229,6 +276,7 @@ class LunaNaturalBridge:
             self._drop_process()
 
     def close(self):
+        self.clear_cache()
         with self._condition:
             self._closing = True
             self._generation += 1
