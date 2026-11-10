@@ -1,0 +1,78 @@
+name: Publish Windows Game Compatibility & Mouse Wheel experimental ZIP
+on:
+  push:
+    branches:
+      - feat/windows-game-capture-mouse-clear-speed-20261110
+    paths:
+      - .github/workflows/publish-game-compat-vnext.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish-verified-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download confirmed successful Windows EXE artifact
+        uses: actions/download-artifact@v4
+        with:
+          run-id: 42787182157
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          name: GameTextReader-FixedRegion-ThreeModes-Experimental
+          path: incoming
+      - name: Checkout built source for GPL source archive
+        uses: actions/checkout@v4
+        with:
+          ref: 31a92b90c43f15bfe0d817cd7d044a2344803ca4
+          persist-credentials: false
+      - name: Verify Windows inner ZIP and bundle complete source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          file="incoming/GameTextReader_FixedRegion_ThreeModes_Experimental_Windows_x64.zip"
+          test -s "$file"
+          test "$(stat -c%s "$file")" -gt 120000000
+          cp "$file" release/BlueStarOCR_GameCompat_MouseWheel_Windows_x64.zip
+          unzip -t release/BlueStarOCR_GameCompat_MouseWheel_Windows_x64.zip | tail -n 2
+          unzip -Z1 release/BlueStarOCR_GameCompat_MouseWheel_Windows_x64.zip | grep -q '^GameTextReader/GameTextReader.exe$'
+          unzip -Z1 release/BlueStarOCR_GameCompat_MouseWheel_Windows_x64.zip | grep -q 'UPSTREAM_LUNA_GPL_SOURCE_v12.1.3.9.zip'
+          git archive --format=zip --output=release/BlueStarOCR_GameCompat_MouseWheel_Source.zip HEAD
+          unzip -t release/BlueStarOCR_GameCompat_MouseWheel_Source.zip | tail -n 2
+          unzip -Z1 release/BlueStarOCR_GameCompat_MouseWheel_Source.zip | grep -q '^game_reader/luna_capture.py$'
+          sha256sum release/*.zip
+          echo "PASS: Windows source commit 31a92b90; 116 automated tests; release ZIP CRC and source checks"
+      - name: Publish original ZIP as a public single-layer prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > notes.txt <<'EOF'
+          Windows 11 x64 Blue Star OCR: game window capture and global mouse wheel experimental update.
+          Built from 31a92b90c43f15bfe0d817cd7d044a2344803ca4.
+          Windows CI run 42787182157: 116 tests passed, frozen OCR, Luna voice worker, accessibility/UIA and F11 picker smoke tests passed.
+          New: wheel up/down/middle and side-key mapping, mode-aware clear, F8 stage timing, HWND-first GDI screenshot with desktop fallback based on LunaTranslator.
+          Single-level ZIP: extract to a NEW folder and run GameTextReader/GameTextReader.exe.
+          The second asset contains the corresponding source code; original upstream LunaTranslator GPLv3 source remains bundled in the main ZIP.
+          Do not overwrite existing versions or your private config..json. No private voice config/credentials are included.
+          Gameplay compatibility (especially Red Dead Redemption 2), hardware mouse capture and actual natural voice audio still require user verification.
+          LunaTranslator source and GPLv3 license: https://github.com/HIllya51/LunaTranslator/tree/v12.1.3.9
+          EOF
+          gh release create "win-gamecompat-mousewheel-vnext-20261110" \
+            release/BlueStarOCR_GameCompat_MouseWheel_Windows_x64.zip \
+            release/BlueStarOCR_GameCompat_MouseWheel_Source.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "31a92b90c43f15bfe0d817cd7d044a2344803ca4" \
+            --title "Blue Star OCR - Game Compatibility and Mouse Wheel (Windows Experimental)" \
+            --prerelease --notes-file notes.txt
+      - name: Verify public release and source assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view "win-gamecompat-mousewheel-vnext-20261110" --repo "$GITHUB_REPOSITORY" \
+             --json isDraft,isPrerelease,assets,url --jq '{isDraft,isPrerelease,url,assets: [.assets[] | {name: .name, size: .size, url: .url}]}'
