@@ -8,31 +8,41 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
+VK_MBUTTON = 0x04
+WHEEL_UP = -1001
+WHEEL_DOWN = -1002
 VK_XBUTTON1 = 0x05
 VK_XBUTTON2 = 0x06
 MOUSE_SIDE_VKS = (VK_XBUTTON1, VK_XBUTTON2)
+MOUSE_BUTTON_VKS = (VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2)
 MODIFIER_VKS = (0x10, 0x11, 0x12, 0x5B, 0x5C)
 HOTKEY_FIELDS = ("vk", "mode_vk", "local_vk", "pick_vk", "clear_vk", "frame_vk")
 HOTKEY_LABELS = ("hotkey_label", "mode_hotkey_label", "local_hotkey_label", "pick_hotkey_label", "clear_hotkey_label", "frame_hotkey_label")
-HOTKEY_DEFAULTS = (0x77, 0x78, 0x79, 0x7A, 0x75, 0x76)  # F8 / F9 / F10 / F11 / F6 / F7
+HOTKEY_DEFAULTS = (0x77, 0x78, 0x79, 0x7A, WHEEL_DOWN, 0x76)  # F8 / F9 / F10 / F11 / wheel down / F7
 DEFAULT_REGION = (-300, -140, 600, 400)
 MIN_PERIOD_MS = 100
 MAX_PERIOD_MS = 60000
 
 
 def valid_hotkey(vk: int) -> bool:
-    """Support single Windows keyboard keys plus the two standard mouse sides."""
+    """Keyboard single keys, middle/side buttons and wheel directions."""
     try:
         n = int(vk)
     except (TypeError, ValueError):
         return False
-    return n in MOUSE_SIDE_VKS or (
+    return n in (WHEEL_UP, WHEEL_DOWN) or n in MOUSE_BUTTON_VKS or (
         8 <= n <= 254 and n not in MODIFIER_VKS
         and n not in (0x01, 0x02, 0x04)  # ordinary clicks must not trigger OCR
     )
 
 
 def hotkey_label(vk: int, keyname: str = "") -> str:
+    if vk == WHEEL_UP:
+        return "滚轮向上"
+    if vk == WHEEL_DOWN:
+        return "滚轮向下"
+    if vk == VK_MBUTTON:
+        return "鼠标中键"
     if vk == VK_XBUTTON1:
         return "鼠标侧键1（后退）"
     if vk == VK_XBUTTON2:
@@ -61,7 +71,7 @@ def sanitize_hotkeys(config: dict) -> dict:
                       if value not in reserved)
         config[field] = vk
         label = config.get(label_field)
-        if (repaired or vk in MOUSE_SIDE_VKS or
+        if (repaired or vk in MOUSE_BUTTON_VKS or vk in (WHEEL_UP, WHEEL_DOWN) or
                 not isinstance(label, str) or not label or
                 (label in ("F8", "F9", "F10", "F11", "F6", "F7") and
                  vk != {"F8": 0x77, "F9": 0x78, "F10": 0x79, "F11": 0x7A, "F6": 0x75, "F7": 0x76}[label])):
