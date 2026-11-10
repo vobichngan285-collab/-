@@ -51,8 +51,8 @@ def is_key_down(vk: int) -> bool:
     return bool(user32.GetAsyncKeyState(int(vk)) & 0x8000)
 
 
-def monitor_rect_at_cursor() -> tuple[int, int, int, int]:
-    x, y = get_cursor()
+def monitor_rect_at_point(x: int, y: int) -> tuple[int, int, int, int]:
+    """Actual monitor geometry at a fixed physical desktop coordinate."""
     monitor = user32.MonitorFromPoint(POINT(x, y), 2)
     if not monitor:
         raise ctypes.WinError(ctypes.get_last_error())
@@ -62,6 +62,10 @@ def monitor_rect_at_cursor() -> tuple[int, int, int, int]:
         raise ctypes.WinError(ctypes.get_last_error())
     r = info.rcMonitor
     return int(r.left), int(r.top), int(r.right), int(r.bottom)
+
+
+def monitor_rect_at_cursor() -> tuple[int, int, int, int]:
+    return monitor_rect_at_point(*get_cursor())
 
 
 def grab_current_monitor() -> tuple[Image.Image, tuple[int, int]]:
