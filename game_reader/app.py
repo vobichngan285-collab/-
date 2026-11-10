@@ -819,11 +819,12 @@ class ReaderApp:
         self.status("按键盘单键或鼠标侧键1/2进行设置；Esc 取消。")
 
     def _hotkey_button(self, field: str):
-        return {"vk": self.key_button, "mode_vk": self.mode_key_button,
-                "local_vk": self.local_key_button,
-                "pick_vk": self.pick_key_button,
-                "clear_vk": self.clear_key_button,
-                "frame_vk": self.frame_key_button}[field]
+        # Resolve only the requested widget; useful for native accessibility
+        # probes and prevents unrelated shortcut controls from being required.
+        name = {"vk": "key_button", "mode_vk": "mode_key_button",
+                "local_vk": "local_key_button", "pick_vk": "pick_key_button",
+                "clear_vk": "clear_key_button", "frame_vk": "frame_key_button"}[field]
+        return getattr(self, name)
 
     def finish_hotkey(self):
         target = self._binding_target
