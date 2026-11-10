@@ -747,8 +747,8 @@ class ReaderApp:
                 (self.period_save_button, "保存局部 OCR 周期"),
                 (self.similarity_check, "启用重复文本相似度过滤"),
                 (self.similarity_spin, "文本相似度阈值零到八"),
-                (self.show_frame_check, "显示跟随鼠标的绿色扫描框"),
-                (self.mode_voice_check, "切换模式时说出鼠标模式或默认模式"),
+                (self.show_frame_check, "默认显示扫描边框"),
+                (self.mode_voice_check, "切换模式时朗读模式名称"),
                 (self.pick_region_button, "从鼠标当前位置暗屏拖框并立即识别"),
                 (self.voice_select, "选择本机微软云希晓晓或其他语音"),
                 (self.rescan_button, "重新扫描本机语音"),
@@ -820,7 +820,8 @@ class ReaderApp:
         return {"vk": self.key_button, "mode_vk": self.mode_key_button,
                 "local_vk": self.local_key_button,
                 "pick_vk": self.pick_key_button,
-                "clear_vk": self.clear_key_button}[field]
+                "clear_vk": self.clear_key_button,
+                "frame_vk": self.frame_key_button}[field]
 
     def finish_hotkey(self):
         target = self._binding_target
@@ -991,7 +992,7 @@ class ReaderApp:
             pass
         if region is None:
             self.status("框选已取消，原识别区域未改变。")
-        elif self.mouse_mode == "region":
+        elif getattr(self, "mouse_mode", "pointer") == "region":
             if anchor is None or monitor is None:
                 self.status("无法保存固定区域：显示器信息丢失。")
                 return
@@ -1019,7 +1020,7 @@ class ReaderApp:
             self.persist()
             if anchor is not None and monitor is not None:
                 self._start_selected_ocr(region, anchor, monitor, snapshot, focus)
-        if self.mouse_mode != "region":
+        if getattr(self, "mouse_mode", "pointer") != "region":
             self._hover_next_due = time.monotonic() + self.settings["period_ms"] / 1000.0
 
     def _start_selected_ocr(self, region: RelativeRegion, anchor, monitor,
