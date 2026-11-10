@@ -298,7 +298,8 @@ def test_f11_global_picker_has_separate_hotkey_and_does_not_conflict():
     assert HOTKEY_FIELDS == ("vk", "mode_vk", "local_vk", "pick_vk", "clear_vk", "frame_vk")
     d = sanitize_hotkeys({"vk": 119, "mode_vk": 120,
                           "local_vk": 121, "pick_vk": 122, "clear_vk": 117})
-    assert [d[k] for k in HOTKEY_FIELDS] == list(HOTKEY_DEFAULTS)
+    assert [d[k] for k in HOTKEY_FIELDS] == [119, 120, 121, 122, 117, 118]
+    assert sanitize_hotkeys({})["clear_vk"] == -1002
 
 
 def test_stale_hover_crop_is_rejected_when_cursor_moves_or_foreground_changes(monkeypatch):
