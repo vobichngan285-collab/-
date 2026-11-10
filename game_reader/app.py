@@ -1724,39 +1724,57 @@ class ReaderApp:
         except Exception:
             moving.hide()
 
+    def _dispatch_hotkey(self, field, trigger_at=None):
+        """One dispatch path shared by keyboard, middle/side and wheel events."""
+        if field == "vk":
+            if self.root.state() == "normal":
+                self.capture_from_button(trigger_at)
+            else:
+                self.capture(trigger_at)
+        elif field == "mode_vk":
+            self.toggle_mouse_mode()
+        elif field == "local_vk":
+            self.start_hover_ocr(manual=True)
+        elif field == "pick_vk":
+            self.select_region()
+        elif field == "clear_vk":
+            self.clear_results()
+        elif field == "frame_vk":
+            self.toggle_region_border()
+
     def poll_input(self):
         if self.closed:
             return
         try:
+            listener = getattr(self, "wheel_listener", None)
+            wheel_events = listener.drain() if listener is not None else []
             if self.setting_hotkey:
-                self._capture_mouse_hotkey()
-                # Holding a newly recorded side button must not immediately
-                # trigger the just assigned action on the next polling frame.
+                # Give the event to the binding UI, never to the game action.
+                if wheel_events:
+                    self._apply_hotkey(wheel_events[0][0])
+                if self.setting_hotkey:
+                    self._capture_mouse_hotkey()
                 for field in HOTKEY_FIELDS:
                     self._hotkey_previous[field] = is_key_down(self.settings[field])
             elif not self._choosing_region:
+                for wheel_key, event_at in wheel_events:
+                    # Wheel reports steps, not GetAsyncKeyState pressed states.
+                    if event_at - getattr(self, "_last_wheel_action_at", 0.0) < 0.25:
+                        continue
+                    for field in HOTKEY_FIELDS:
+                        if self.settings.get(field) == wheel_key:
+                            self._last_wheel_action_at = event_at
+                            self._dispatch_hotkey(field, event_at)
+                            break
                 for field in HOTKEY_FIELDS:
                     vk = self.settings.get(field, 0x76 if field == "frame_vk" else 0)
+                    if vk in (WHEEL_UP, WHEEL_DOWN):
+                        continue
                     down = is_key_down(vk)
                     old = self._hotkey_previous.get(field, down)
                     self._hotkey_previous[field] = down
-                    if not down or old:
-                        continue
-                    if field == "vk":
-                        if self.root.state() == "normal":
-                            self.capture_from_button()
-                        else:
-                            self.capture()
-                    elif field == "mode_vk":
-                        self.toggle_mouse_mode()
-                    elif field == "local_vk":
-                        self.start_hover_ocr(manual=True)
-                    elif field == "pick_vk":
-                        self.select_region()
-                    elif field == "clear_vk":
-                        self.clear_results()
-                    elif field == "frame_vk":
-                        self.toggle_region_border()
+                    if down and not old:
+                        self._dispatch_hotkey(field, time.monotonic())
 
             if self.expires_at is not None and time.monotonic() >= self.expires_at:
                 if self.mouse_mode == "pointer":
