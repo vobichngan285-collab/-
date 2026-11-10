@@ -59,6 +59,8 @@ DEFAULTS = {"vk": 0x77, "hotkey_label": "F8",
             "volume": 100, "dwell_ms": 0, "luna_config": "",
             **DEFAULT_FILTER_SETTINGS}
 RESULT_TTL_SECONDS = 60.0
+FRAME_COLORS = {"绿色": "#42DD9C", "蓝色": "#38A8FF", "黄色": "#FFD34D",
+                "红色": "#FF7373", "白色": "#FFFFFF"}
 
 
 def read_settings() -> dict:
@@ -361,14 +363,16 @@ class ReaderApp:
 
         strategy = section(fixed_page, "识别方式")
         self.region_strategy_var = tk.StringVar(value=self.settings["region_strategy"])
-        ttk.Radiobutton(
+        self.region_change_radio = ttk.Radiobutton(
             strategy, text="画面变化时识别", value="change",
             variable=self.region_strategy_var,
-            command=self.save_region_preferences).pack(anchor="w")
-        ttk.Radiobutton(
+            command=self.save_region_preferences)
+        self.region_change_radio.pack(anchor="w")
+        self.region_period_radio = ttk.Radiobutton(
             strategy, text="周期识别", value="period",
             variable=self.region_strategy_var,
-            command=self.save_region_preferences).pack(anchor="w")
+            command=self.save_region_preferences)
+        self.region_period_radio.pack(anchor="w")
         period_row = row(strategy, 3)
         card_label(period_row, "周期（毫秒）").pack(side="left")
         self.region_period_var = tk.StringVar(value=str(self.settings["region_period_ms"]))
@@ -554,6 +558,92 @@ class ReaderApp:
         self.page_title.set(titles[which])
         self.current_page = which
 
+    def color_display_name(self) -> str:
+        color = display_color(self.settings.get("frame_color"))
+        return next((name for name, code in FRAME_COLORS.items() if code == color), "绿色")
+
+    def format_fixed_region(self):
+        box = parse_fixed_region(self.settings.get("fixed_region"),
+                                 self.settings.get("fixed_monitor"))
+        if box is None:
+            return "尚未框选固定区域，切换到区域跟踪后按 F11。"
+        x1, y1, x2, y2 = box
+        return f"固定区域：X={x1}，Y={y1}，宽 {x2-x1}，高 {y2-y1} 像素"
+
+    def _apply_frame_style(self):
+        """Replace all border windows atomically; never change OCR coordinates."""
+        style = (display_color(self.settings["frame_color"]),
+                 parse_thickness(self.settings["frame_thickness"]))
+        if getattr(self, "_frame_style", None) == style:
+            return
+        from .overlay import ClickThroughOutline
+        made = []
+        try:
+            made.append(ClickThroughOutline(color=style[0], thickness=style[1]))
+            made.append(ClickThroughOutline(
+                color=style[0], thickness=style[1], alpha=92, padding=3))
+            made.append(ClickThroughOutline(
+                color=style[0], thickness=style[1], alpha=215, padding=3))
+        except Exception as exc:
+            for outline in made:
+                outline.close()
+            self.overlay_error = type(exc).__name__
+            return
+        old = (getattr(self, "overlay", None),
+               getattr(self, "scan_frame", None),
+               getattr(self, "fixed_frame", None))
+        self.overlay, self.scan_frame, self.fixed_frame = made
+        self._frame_style = style
+        self.overlay_error = ""
+        for outline in old:
+            if outline is not None:
+                outline.close()
+
+    def save_region_preferences(self, _event=None):
+        try:
+            period = parse_period_ms(self.region_period_var.get())
+        except ValueError as exc:
+            self.region_period_var.set(str(self.settings["region_period_ms"]))
+            self.status(str(exc))
+            return False
+        self.settings["region_period_ms"] = period
+        new_strategy = parse_strategy(self.region_strategy_var.get())
+        if new_strategy != self.settings["region_strategy"]:
+            self._region_last_fingerprint = None
+        self.settings["region_strategy"] = new_strategy
+        self._region_next_due = time.monotonic() + 0.06
+        self.persist()
+        return True
+
+    def save_frame_preferences(self, _event=None):
+        name = self.frame_color_var.get()
+        if name not in FRAME_COLORS:
+            self.frame_color_var.set(self.color_display_name())
+            return False
+        value = self.frame_thickness_var.get().strip()
+        if not value.isdecimal() or not 1 <= int(value) <= 8:
+            self.frame_thickness_var.set(str(self.settings["frame_thickness"]))
+            self.status("边框粗细必须为 1～8 像素。")
+            return False
+        self.settings["frame_color"] = FRAME_COLORS[name]
+        self.settings["frame_thickness"] = int(value)
+        self.settings["show_scan_frame"] = bool(self.frame_enabled_var.get())
+        self.show_frame_var.set(self.settings["show_scan_frame"])
+        if self.mouse_mode == "region":
+            self._region_border_visible = self.settings["show_scan_frame"]
+        self._apply_frame_style()
+        self.update_scan_frame()
+        self.persist()
+        return True
+
+    def toggle_region_border(self):
+        """F7 is visual only: never resets recognition or speech."""
+        if self.mouse_mode != "region":
+            return
+        self._region_border_visible = not self._region_border_visible
+        self.update_scan_frame()
+        self.status("区域框已显示。" if self._region_border_visible else "区域框已隐藏。")
+
     def save_visual_settings(self):
         for name, variable in (
             ("show_scan_frame", self.show_frame_var),
@@ -565,8 +655,18 @@ class ReaderApp:
             ("filter_symbols", self.filter_symbols_var),
         ):
             self.settings[name] = bool(variable.get())
-        if not self.settings["show_scan_frame"] and self.scan_frame is not None:
-            self.scan_frame.hide()
+        if hasattr(self, "frame_enabled_var"):
+            self.frame_enabled_var.set(self.settings["show_scan_frame"])
+        if not self.settings["show_scan_frame"]:
+            if self.scan_frame is not None:
+                self.scan_frame.hide()
+            if self.overlay is not None:
+                self.overlay.hide()
+            if self.mouse_mode == "region":
+                self._region_border_visible = False
+        elif self.mouse_mode == "region":
+            self._region_border_visible = True
+        self.update_scan_frame()
         self.persist()
 
     def save_similarity(self, _event=None):
@@ -582,10 +682,10 @@ class ReaderApp:
         self.status(f"文本相似度阈值已设置为 {value}。")
 
     def set_mouse_mode(self, desired: str):
-        if desired not in ("pointer", "hover"):
+        if desired not in ("pointer", "hover", "region"):
             raise ValueError("未知鼠标模式")
         if self.mouse_mode != desired:
-            self.toggle_mouse_mode()
+            self._switch_mouse_mode(desired)
 
     def apply_mouse_settings(self):
         try:
@@ -622,13 +722,23 @@ class ReaderApp:
             targets = [
                 (self.key_button, "全屏 OCR 截图快捷键"),
                 (self.mouse_mode_button, "切换到鼠标模式"),
+                (self.region_mode_button, "切换到固定区域跟踪朗读模式"),
                 (self.default_mode_button, "切换到默认模式"),
                 (self.apply_mouse_button, "应用并保存鼠标 OCR 设置"),
                 (self.reset_mouse_button, "恢复鼠标设置默认值，不清除语音授权"),
-                (self.mode_key_button, "切换默认模式和鼠标模式的快捷键"),
+                (self.mode_key_button, "循环切换默认、鼠标跟随和区域跟踪三种模式的快捷键"),
                 (self.local_key_button, "立即识别鼠标附近文字的快捷键"),
                 (self.pick_key_button, "全局从鼠标位置开始自由拖框的快捷键"),
                 (self.clear_key_button, "手动立即清空识别结果的快捷键"),
+                (self.frame_key_button, "显示隐藏固定区域框快捷键，默认 F7"),
+                (self.region_pick_button, "在区域跟踪模式下框选固定 OCR 区域"),
+                (self.region_change_radio, "画面发生变化才触发区域 OCR"),
+                (self.region_period_radio, "按照指定毫秒周期识别固定区域"),
+                (self.region_period_entry, "区域定时识别周期，100 到 60000 毫秒"),
+                (self.region_period_button, "保存区域识别策略和周期"),
+                (self.frame_enabled_check, "切回区域跟踪时默认显示边框"),
+                (self.frame_color_select, "选择边框颜色"),
+                (self.frame_thickness_spin, "设置边框粗细一至八像素"),
                 (self.success_cue_check, "识别成功提示音开关"),
                 (self.test_cue_button, "试听识别成功的金属叮声，不启动 OCR"),
                 (self.period_entry, "鼠标局部 OCR 周期，单位毫秒"),
@@ -655,6 +765,7 @@ class ReaderApp:
             ]
             for key, label in (
                 ("mouse", "进入 OCR 与鼠标设置"),
+                ("region", "进入区域跟踪设置"),
                 ("voice", "进入语音设置"),
                 ("fullscreen", "进入全屏 OCR 设置"),
                 ("filters", "进入内容过滤设置"),
@@ -736,7 +847,7 @@ class ReaderApp:
             return False
         field = self._binding_target
         for other in HOTKEY_FIELDS:
-            if other != field and self.settings[other] == vk:
+            if other != field and self.settings.get(other, -1) == vk:
                 self.status("该按键已用于其他功能，请换一个不冲突的键。")
                 return False
         label_field = HOTKEY_LABELS[HOTKEY_FIELDS.index(field)]
