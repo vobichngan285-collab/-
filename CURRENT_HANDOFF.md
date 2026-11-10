@@ -1,5 +1,14 @@
 # Windows 游戏文字助手｜当前交接（2026-11-10 · 区域跟踪实验版）
 
+## 最新进展｜2026-11-10 Windows GameTextReader 最新版无法解压：原 EXE 无损双格式重新打包（已发布）
+
+- **用户实际反馈：** 用户重新切回**电脑 Windows 11 截图 OCR + 鼠标指向朗读**工具，报告目前最新的**游戏 HWND 固定绑定版** ZIP 在用户电脑上“无法解压”，要求重新制作下载包。不可混同安卓 Blue Star Guide。原先 Release ZIP 源文件本身通过 CRC，所以原因**未定位**，不能凭此断言程序损坏；需要兼容 Windows 自带解压并提供备用格式。
+- **不改代码与历史版本：** 保留原已 Windows 构建与测试通过的 EXE，固定编译源码 `44c19d3043d52d5d673b03f46f8e5e63b6e92d68`，源 Windows CI [42800465082](https://github.com/vobichngan285-collab/-/actions/runs/42800465082) **121 passed / 1 warning / 0 failed**。不修改 PP-OCRv6 Small、微软原 Luna 语音、F8、F11、F9 三模式、鼠标滚轮、HWND 绑定和 UI 无障碍，也不打包用户私人 `config..json`。源分支 `fix/windows-luna-bound-game-window-20261110` 和 Release `win-game-bound-20261110` 都不覆盖。
+- **隔离打包分支：** `pack/windows-bound-zip-7z-recovery-20261110`，仅新增 `.github/workflows/repack-bound-extract-recovery.yml`，运行时**从原成功 Windows CI 下载已冻结原始 EXE artifact**（不是从 main 重新编译），校验原单层 ZIP 130294928 bytes、SHA256 `c819f19aac8e97cd52889d68a70b5e951ec37665227f2f45215f057dfa22c913`，1186文件、全部 ZIP CRC、原 exe/官方 Small 模型/原版 Luna 二进制与 GPL 源码完整，最长相对路径106字符且不含私密配置。首轮工作流 [42830848477](https://github.com/vobichngan285-collab/-/actions/runs/42830848477) 因 ubuntu-22.04 默认 Python 不支持 `hashlib.file_digest` 而失败，加入 Python 3.11后恢复，**不涉及产品 EXE 代码变动**。
+- **双格式新包并逐字节验收：** 最新 GitHub Actions [42830988762](https://github.com/vobichngan285-collab/-/actions/runs/42830988762) **completed/success**，分支工作流 commit `a14d7ebd1d97d154336c5b68c2d5ea84757e3249`。新 Windows Explorer 内置可用 `ZIP_STORED` **不压缩 ZIP**，单层 `GameTextReader/` 文件夹，含简明说明，**282801938 bytes**，SHA256 `cfd2821b62fa9fe9e31f584effb3cff56804c5cf770314d3dda2959942d4e28b`。备用 **7z** `106024961 bytes`，SHA256 `311ea20cfa19ade8ae4af8870b783d74c592f39503b7e49e8a1b6de6be4da96f`，需 Windows 7-Zip。重新打包后**1187 个文件（含新增 README 解压说明）**，两种格式都成功完整解压，逐文件 SHA256 与原 EXE 源提取目录一致，所含官方 Luna GPL 源码不变。新压缩包对用户电脑是否能正常解压仍需真人测试，且网路下载中断会造成损坏。
+- **公开新 Release：** https://github.com/vobichngan285-collab/-/releases/tag/win-game-bound-repack-zip7z-20261110 。ZIP 直链：https://github.com/vobichngan285-collab/-/releases/download/win-game-bound-repack-zip7z-20261110/BlueStarOCR_GameTextReader_Windows_ExtractFix_Store.zip 。7z 直链：https://github.com/vobichngan285-collab/-/releases/download/win-game-bound-repack-zip7z-20261110/BlueStarOCR_GameTextReader_Windows_ExtractFix_7Zip.7z 。另有 `SHA256SUMS.txt`。非草稿 public prerelease，三个资产均 uploaded。
+- **用户安装指引：** **优先 ZIP** 用 Windows “全部解压”，建议解到短路径 `C:\BlueStarOCR\`，得到 `C:\BlueStarOCR\GameTextReader\GameTextReader.exe`。避免在压缩文件预览器里直接运行 EXE，避免覆盖旧版。若 ZIP 无法解压，再下载 7z 用 7-Zip 解压；若两种均报损坏先核对下载**实际文件大小和 SHA256**，排除下载不完整；用户不用重新填写 OCR 权重或其他新配置（私有语音配置信息不可置于公开包）。目前用户电脑是否能正常运行最新游戏菜单修复仍待实际测试。
+
 ## 最新进展｜2026-11-10 真实《七日杀》跨菜单朗读故障：固定游戏 HWND 修复实验版（已构建/发布）
 
 - **用户发现的实际问题：** 新版在《七日杀》游戏首页「开始游戏/继续游戏/设置」可以 OCR 朗读，但点击「开始游戏」进入另一页面后，F8 有「叮」声、鼠标指向读不出当前页面文字。用户确认故障与滚轮无关，并指出游戏窗口自身未变；要求直接参照 LunaTranslator 的持久绑定游戏窗口思路，不重新设计 OCR/TTS。
