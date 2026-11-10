@@ -97,7 +97,7 @@ def test_mode_announcements_use_selected_voice_not_filtered(monkeypatch):
     app.speak_selected = spoken.append
     app.toggle_mouse_mode()
     app.toggle_mouse_mode()
-    assert spoken == ["鼠标模式", "默认模式"]
+    assert spoken == ["鼠标跟随模式", "区域跟踪"]
     assert app.speech.stops == 2
 
 
@@ -113,6 +113,7 @@ def test_green_scan_frame_is_click_through_and_uses_same_bbox_as_crop(monkeypatc
         def state(self): return "iconic"
     app=ReaderApp.__new__(ReaderApp)
     app.scan_frame=Frame()
+    app.mouse_mode="hover"
     app.root=Root()
     app._choosing_region=False
     app.setting_hotkey=False
