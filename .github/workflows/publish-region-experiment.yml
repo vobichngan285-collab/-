@@ -1,0 +1,65 @@
+name: Publish direct-download fixed-region experiment ZIP
+on:
+  push:
+    branches:
+      - exp/windows-fixed-region-tracking-20261110
+    paths:
+      - .github/workflows/publish-region-experiment.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish-verified-zip:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Retrieve previously successful Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          run-id: 42762512266
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          name: GameTextReader-FixedRegion-ThreeModes-Experimental
+          path: incoming
+
+      - name: Verify inner Windows ZIP CRC, size and original SHA256
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          source_file="incoming/GameTextReader_FixedRegion_ThreeModes_Experimental_Windows_x64.zip"
+          test -s "$source_file"
+          cp "$source_file" "release/BlueStarOCR_RegionTracking_Windows_x64.zip"
+          echo 'e58d38a2c2948cda5c6a3d0472b6187e2d527b2c5d2ec3009b9d27e420182430  release/BlueStarOCR_RegionTracking_Windows_x64.zip' | sha256sum --check
+          unzip -t "release/BlueStarOCR_RegionTracking_Windows_x64.zip" | tail -n 2
+          ls -lh release/*.zip
+
+      - name: Publish public direct-download GitHub Release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release-notes.txt <<'EOF'
+          Windows 11 x64 fixed-region third mode (experimental), built from a93e31e4b034df6e514bd5b314c05ee702378c16.
+          109 Windows CI tests passed; 49 accessible native controls verified.
+          Single-level ZIP: extract directly, then run GameTextReader/GameTextReader.exe.
+          F9 cycles three modes; F11 draws a new region in region-tracking mode; F7 toggles border visibility.
+          Fixed region supports on-change detection or periodic OCR.
+          User's private config..json is not included.
+          Real game FPS and voice playback still need testing.
+          EOF
+          gh release create "win-region-experiment-20261110" \
+            "release/BlueStarOCR_RegionTracking_Windows_x64.zip" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "a93e31e4b034df6e514bd5b314c05ee702378c16" \
+            --title "Blue Star OCR - Region Tracking Experiment (Windows x64)" \
+            --prerelease --notes-file release-notes.txt
+
+      - name: Confirm public release asset is downloadable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "win-region-experiment-20261110" --repo "${GITHUB_REPOSITORY}" \
+             --json url,assets --jq '{url: .url, assets: [.assets[] | {name: .name, size: .size, url: .url}]}'
