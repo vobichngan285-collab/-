@@ -1,4 +1,15 @@
-# Windows 游戏文字助手｜当前交接（2026-11-10 · V1.2.1）
+# Windows 游戏文字助手｜当前交接（2026-11-10 · 区域跟踪实验版）
+
+## 最新进展｜2026-11-10 固定区域跟踪 OCR 第三模式实验版（Windows CI 已成功）
+
+- **原仓库/基线/隔离：** `vobichngan285-collab/-`；从已通过的 V1.2.1 `997ade1552d097917b8a3121b963c4b45d6844fb` 新建 `exp/windows-fixed-region-tracking-20261110`。成功构建 Commit `a93e31e4b034df6e514bd5b314c05ee702378c16`。未覆盖 V1.2.1、未合入 main 应用代码，安卓 `kanzi-assistant` 未改。
+- **用户确定交互已实现：** 同一模式单键（默认 F9）循环 `默认(pointer) → 鼠标跟随(hover) → 区域跟踪(region) → 默认`；区域模式 F11 暗屏左键自由拖框，松开立即按选定像素识别且开始持续跟踪；保存 `fixed_region` 绝对物理坐标与 `fixed_monitor` 原显示器边界，切走再回来自动恢复，启动程序仍默认进入普通模式，不会自行后台扫描。鼠标跟随旧 `region` 偏移独立保存，不被固定框覆盖。
+- **识别策略：** `region_strategy=change` 默认每300ms仅低成本取样变化、变化时才运行 PP-OCRv6 Small；`period` 则用户手动设置 `region_period_ms` 100～60000ms，默认500ms，每次周期 OCR。每一模式同一时刻最多一个局部识别任务，三种截图共享 `_ocr_lock`；用 generation 和 job_id 丢弃模式切换/清除后的晚到结果。新文字行才朗读，重复行静音；文字消失后再出现可以重读。
+- **边框：** 原生 Win32 四段点击穿透边框复用三个模式；颜色绿色/蓝色/黄色/红色/白色，粗细1～8像素；默认绿色3px。区域跟踪默认显示已框选的固定位置，可用可重绑定 F7 显示/隐藏，**仅改视觉、不触发 OCR、不打断 TTS**。F7 与原 F8/F9/F10/F11/F6 防冲突；离开区域跟踪自动隐藏，再进入按默认显示设置恢复。较粗边框使用额外外边距，确保始终在精确 OCR 截图像素外。
+- **完整审核和修复：** 检查模式状态机、Windows 显示器变更/负坐标、F11 背景截图与框选恢复、OCR 单任务互斥、F6 后不把相同文字立即重新播报、旧结果丢弃、边框对截图污染、Windows UIA 焦点。首轮冻结包测试发现旧 F11 自测虚拟 App 缺少新状态字段，已修复；新增 F7 控件惰性查找，测试夹具可独立调用。最终不再有失败。
+- **Windows Actions 最终证据：** [run 42762512266](https://github.com/vobichngan285-collab/-/actions/runs/42762512266) `completed/success`，**109 passed，1 warning，0 failed**；真实 Small 模型自测、冻结 EXE 启动、原版未修改 Luna 二进制与源码哈希、持续语音 worker、Win32 五种颜色原生边框、F11 picker 三次真 Tk 开关/拖选、原生 UIA `Strategy.PROVIDED` 和 **49 个命名控件**全部通过。
+- **实验版工件：** [artifact 13737813672](https://github.com/vobichngan285-collab/-/actions/runs/42762512266/artifacts/13737813672)，名称 `GameTextReader-FixedRegion-ThreeModes-Experimental`，129838758 bytes，到期 `2026-12-10T05:31:57Z`。外层 GitHub Actions artifact 内含便携 `GameTextReader_FixedRegion_ThreeModes_Experimental_Windows_x64.zip`，这是 ZIP 便携 EXE，不是 MSI 安装器；解压独立新目录，不覆盖旧版。私人 `config..json`、微软模型/密钥不在公开包内。
+- **真机待确认：** 游戏 《七日杀》持久跟踪实际文字变化准确率、CPU/游戏帧率、Windows 全屏截图区域与 F7 边框可见性、云希/晓晓真实播放。CI 不代表用户 PC 音频听觉和 FPS 验收。若游戏动态背景不断变化，可能频繁触发 change OCR；可切到可调周期模式降低负载。下一轮根据用户反馈定点修，不重做离线 Medium/安卓实验。
 
 ## 最新进展｜2026-11-10 V1.2.1 提示音、界面精简与鼠标语音提速（已构建）
 
