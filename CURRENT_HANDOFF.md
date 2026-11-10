@@ -1,5 +1,16 @@
 # Windows 游戏文字助手｜当前交接（2026-11-10 · 区域跟踪实验版）
 
+## 最新进展｜2026-11-10 Windows 游戏窗口截图 + 鼠标滚轮智能清除 + 全屏计时（独立实验版构建与公开发布成功）
+
+- **项目和隔离：** 唯一优先为 Windows 11 游戏 OCR（非安卓）。原仓库 https://github.com/vobichngan285-collab/- 。原固定区域实验版本和稳定版保留；本轮新独立分支 \`feat/windows-game-capture-mouse-clear-speed-20261110\`，目前发布工作流修复后的分支 HEAD \`07f8e60aad103c9a0021f71fa2e47ea315a9bfdf\`。**实际被 Windows runner 编译的应用源码 Commit 是 \`31a92b90c43f15bfe0d817cd7d044a2344803ca4\`**；后续为许可证说明和发布工作流，不能误认为另一个 EXE 编译版。
+- **更新 1（鼠标）：** 新 \`game_reader/mouse_input.py\` 采用独立 WH_MOUSE_LL 消息线程处理滚轮方向增量，永远 CallNextHookEx 放行原鼠标滚动；鼠标中键、侧键与键盘仍使用现有 GetAsyncKeyState；快捷键绑定、名称、重复冲突检查共享原逻辑。新默认清除键为「滚轮向下」，旧 F6 默认配置升级；用户改过的其他按键原样保留。加入滚轮短时间重复抑制和细粒度 delta 累积。
+- **更新 2（三模式智能清除）：** 默认模式删除旧 OCR 坐标、框、朗读；鼠标跟随模式清除后停止自动扫描，重新进入模式才恢复；固定区域模式清除 \`fixed_region\` 和 \`fixed_monitor\` 的记忆，停止扫描并使旧 job 失效、隐藏边框，需 F11 再框选。F7 只控制边框显示，不改变 OCR。区域跟踪依旧保留普通模式切换后的恢复能力，除非用户真的按清除快捷键删除。
+- **更新 3（F8 诊断）：** 记录按键到 OCR 完成、截图、OCR 锁等待、图像预处理、模型推理阶段的毫秒数；避免已有 RGB 图像的重复 RGB 转换；主窗口触发的固定隐藏等待从 250ms 减少为 120ms（游戏内 F8 仍立即处理）。**没有把成功叮声提前到 OCR 完成之前**，没有调整 Small 识别模型权重，也没有声称真实提速百分比。
+- **更新 4（大型游戏截图）：** 新 \`game_reader/luna_capture.py\` 参照原作者 HIllya51/LunaTranslator \`v12.1.3.9\` 的 \`src/NativeImpl/NativeUtils/screenshot.cpp\`：优先目标游戏 HWND 的 GetDC + BitBlt，坐标 ScreenToClient，对空白窗口截屏回退原桌面 ImageGrab；全屏、局部、框选快照和固定区域调用统一的截图接口。原版 LunaSubprocess64.exe 和所有语音适配未改动。新增 \`LUNA_CAPTURE_NOTICE.md\` 明确 GPLv3 来源；公共发布提供本项目源码 ZIP 和原 Luna 上游 GPL 源码包。
+- **Windows CI：** [run 42787182157](https://github.com/vobichngan285-collab/-/actions/runs/42787182157) \`completed/success\`，**116 passed、1 warning、0 failed**；冻结 EXE、真实官方 Small ONNX OCR、原版 Luna worker、UI 自动化无障碍控件、F11 Tk 框选均通过。新测试覆盖滚轮高精度 delta、方向绑定和冲突、三模式智能清除、HWND 优先/桌面回退。
+- **公开 Release：** [run 42787873992](https://github.com/vobichngan285-collab/-/actions/runs/42787873992) \`completed/success\`，发布 \`win-gamecompat-mousewheel-vnext-20261110\`，不是旧区域实验包。单层 Windows ZIP 130291497 bytes、SHA256 \`c1214fc5c4f52efc936f74895e33532c3650fb1396b4132a3058a1300ca59055\`；[直接下载](https://github.com/vobichngan285-collab/-/releases/download/win-gamecompat-mousewheel-vnext-20261110/BlueStarOCR_GameCompat_MouseWheel_Windows_x64.zip)。另外公开项目源码 ZIP 124186 bytes、SHA256 \`dd48f6b752fa16bef96fe92bf931fa649503a217c40c3cb3f62a738c7495b806\`。ZIP CRC 和内部 EXE/原 Luna 源码均验证过；私人 \`config..json\` 不公开也不修改。
+- **边界与验收：** 这是**待用户真机测试的独立实验版**，不能宣称《荒野大镖客 2》/ Vulkan、DX12、独占全屏游戏已修复，也不能宣称鼠标滚轮钩子在所有游戏都能收到消息或云希/晓晓已听觉验收。Windows CI 无真实 3D 游戏、用户设备或微软语音授权。测试重点：F8 是否按键生效且截图来自游戏、文字框能否正确命中、滚轮是否既能清除又保留游戏滚动、模式清除后不自动重生、F8 阶段耗时。若问题复现，先取不含屏幕内容的阶段日志，不重写或替换原语音引擎。
+
 ## 最新进展｜2026-11-10 GitHub 公开 Release 直接下载补救（成功）
 
 - **原因：** 用户反馈旧 Actions artifact 下载慢、无法解压；原 GitHub Actions 链接可能要求登录并多套一层 ZIP。不能据此断言用户本地 ZIP 实际损坏。
