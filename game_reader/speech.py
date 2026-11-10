@@ -82,6 +82,9 @@ class SpeechWorker:
                             self._winrt.send("stop")
                         if self._luna_natural is not None:
                             self._luna_natural.stop()
+                    elif command == "clear_cache":
+                        if self._luna_natural is not None:
+                            self._luna_natural.clear_cache()
                     elif command == "luna_config":
                         self._luna_config_path = str(arg or "")
                         if self._luna_natural is not None:
@@ -190,6 +193,10 @@ class SpeechWorker:
         with self._speech_lock:
             self._speech_generation += 1
         self._commands.put(("stop", None))
+
+    def clear_cache(self):
+        """Forget short-lived in-memory synthesis when OCR is cleared/expired."""
+        self._commands.put(("clear_cache", None))
 
     def set_voice(self, voice_id: str):
         self._commands.put(("voice", voice_id))
