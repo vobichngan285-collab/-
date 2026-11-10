@@ -21,6 +21,10 @@ jobs:
         with:
           ref: 44c19d3043d52d5d673b03f46f8e5e63b6e92d68
           persist-credentials: false
+      - name: Select Python 3.11 for sha256 file_digest and ZIP verification
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Download exact successful Windows artifact, not a new EXE
         uses: actions/download-artifact@v4
