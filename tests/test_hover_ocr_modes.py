@@ -388,7 +388,7 @@ def test_global_picker_reopens_repeatedly_after_cancel_on_real_windows(monkeypat
         root.destroy()
 
 
-def test_f11_opens_picker_globally_and_window_switch_clears_old_ocr(monkeypatch):
+def test_f11_opens_picker_globally_without_erasing_game_ocr_on_focus_change(monkeypatch):
     import game_reader.app as mod
     class FakeRoot:
         def after(self, ms, callback):
@@ -408,6 +408,9 @@ def test_f11_opens_picker_globally_and_window_switch_clears_old_ocr(monkeypatch)
     app.busy = False
     app.lines = [OCRLine("旧桌面图标", 10, 10, 90, 40)]
     app._full_capture_window = 100
+    app.last_target = None
+    app.hover = SimpleNamespace(reset=lambda: None)
+    app.overlay = None
     calls = []
     app.select_region = lambda: calls.append("picker")
     def invalidate(reason):
@@ -419,6 +422,7 @@ def test_f11_opens_picker_globally_and_window_switch_clears_old_ocr(monkeypatch)
     monkeypatch.setattr(mod, "is_key_down", lambda vk: keys.get(vk, False))
     monkeypatch.setattr(mod, "foreground_window_id", lambda: 200)
     app.poll_input()
-    assert calls == ["picker", "old-coords-cleared"]
+    assert calls == ["picker"]
+    assert app.lines and app.lines[0].text == "旧桌面图标"
     app.poll_input()
-    assert calls == ["picker", "old-coords-cleared"]
+    assert calls == ["picker"]
