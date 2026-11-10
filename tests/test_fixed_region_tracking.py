@@ -227,3 +227,63 @@ def test_no_overlapping_region_ocr_and_period_or_change_strategy(monkeypatch):
     e3=app.events.get(timeout=2)
     assert e3[3]==[]
     assert len(calls)==2
+
+
+def test_manual_clear_preserves_region_dedup_but_erases_visible_results():
+    app = ReaderApp.__new__(ReaderApp)
+    app.mouse_mode = "region"
+    app._region_last_text = "获得石斧"
+    app._region_prev_lines = ["获得石斧"]
+    app._region_last_fingerprint = screenshot_fingerprint(
+        Image.new("RGB", (90, 60), "black"))
+    app.capture_id = 7
+    app.mode_generation = 4
+    app.busy = False
+    app.pending_full_capture = False
+    app._hover_last_text = ""
+    app.expires_at = 10
+    app.lines = [OCRLine("以前识别的句子", 1, 1, 80, 30)]
+    app._full_capture_window = None
+    app.last_target = None
+    app._hover_spoken_cursor = None
+    app._hover_spoken_foreground = None
+    app.hover = SimpleNamespace(reset=lambda: None)
+    calls = []
+    app.speech = SimpleNamespace(stop=lambda:calls.append("stop"),
+                                 clear_cache=lambda:calls.append("clear_cache"))
+    app.overlay = None
+    app.read_btn = SimpleNamespace(configure=lambda **kw:None)
+    app.update_output = lambda s:calls.append(("output",s))
+    app.status = lambda s:None
+    app.invalidate("已清空")
+    assert app.lines == []
+    assert app._region_last_text == "获得石斧"
+    assert app._region_prev_lines == ["获得石斧"]
+    assert calls == ["stop", "clear_cache", ("output", "")]
+
+
+def test_f7_shortcut_can_be_rebound_without_overwriting_f11():
+    app = ReaderApp.__new__(ReaderApp)
+    frame_button = object()
+    app.frame_key_button = frame_button
+    assert app._hotkey_button("frame_vk") is frame_button
+    config = sanitize_hotkeys({"pick_vk": 0x76})
+    assert config["pick_vk"] == 0x76
+    assert config["frame_vk"] != 0x76
+    assert len(set(config[k] for k in HOTKEY_FIELDS)) == 6
+
+
+def test_win32_all_palette_outlines_remain_native_and_outside_ocr():
+    import sys
+    if sys.platform != "win32":
+        pytest.skip("Windows native layered windows only")
+    from game_reader.overlay import ClickThroughOutline
+    for color in ("#42DD9C", "#38A8FF", "#FFD34D", "#FF7373", "#FFFFFF"):
+        outline = ClickThroughOutline(color=color, thickness=8, padding=9)
+        try:
+            assert outline.padding >= outline.thickness + 1
+            outline.show(OCRLine("test", 150, 150, 450, 300))
+            outline.show(OCRLine("test", 150, 150, 450, 300))
+            outline.hide()
+        finally:
+            outline.close()
