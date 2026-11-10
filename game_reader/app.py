@@ -197,8 +197,8 @@ class ReaderApp:
         self.create_widgets()
         self.enable_accessibility()
         self.scan_voices()
-        self.root.after(25, self.poll_input)
-        self.root.after(40, self.poll_messages)
+        self.root.after(15, self.poll_input)
+        self.root.after(15, self.poll_messages)
 
     def create_widgets(self):
         """Large-print, native-widget settings UI.
@@ -1578,8 +1578,7 @@ class ReaderApp:
             try:
                 focus = game_hwnd or foreground_window_id()
                 capture_report = {}
-                image, origin = (grab_current_monitor(game_hwnd, report=capture_report)
-                                 if game_hwnd else grab_current_monitor())
+                image, origin = grab_current_monitor(game_hwnd or None, report=capture_report)
                 captured_at = time.monotonic()
                 capture_ms = round((captured_at - started) * 1000)
                 phase = f"离线OCR推理（{tier}）"
@@ -1615,6 +1614,13 @@ class ReaderApp:
                     source = extra[0] if extra else "fullscreen"
                     timings = extra[1] if len(extra) > 1 else None
                     self.lines = build_reading_regions(lines)
+                    speakable = filter_speech_text(
+                        "\n".join(region.text for region in self.lines), self.settings)
+                    # Queue the short cue before Tk text/status rendering. No fake
+                    # completion sound for an empty or fully filtered OCR result.
+                    if (self.mouse_mode == "pointer"
+                            and self.settings.get("success_cue", True) and speakable):
+                        self.cues.play("complete")
                     self._full_capture_window = focus
                     self.hover.reset()
                     self.last_target = None
@@ -1626,23 +1632,19 @@ class ReaderApp:
                     self.status(f"识别完成：{len(self.lines)} 个朗读区域；"
                                 f"耗时 {milliseconds} 毫秒{timing_note}。"
                                 "60 秒后自动清空。")
-                    speakable = filter_speech_text(
-                        "\n".join(region.text for region in self.lines), self.settings)
                     if source == "fullscreen" and timings and len(timings) >= 6:
                         # Monotonic key-to-cue request, not audio device latency.
                         self.last_full_timing = (
                             f"按键到完成 {round((time.monotonic()-timings[5])*1000)}ms；"
+                            f"检测文字 {len(lines)} 行，朗读区域 {len(self.lines)}；"
                             f"截图 {timings[0]}ms，锁等待 {timings[2]}ms，"
                             f"预处理 {timings[3]}ms，模型 {timings[4]}ms；"
                             f"截图方式 {timings[6] if len(timings) > 6 else '原版'}；"
                             f"结果整理完成，等待提示音请求。")
                         self.status(self.last_full_timing)
-                    if (self.mouse_mode == "pointer"
+                    if (self.mouse_mode == "pointer" and self.lines and not speakable
                             and self.settings.get("success_cue", True)):
-                        if speakable:
-                            self.cues.play("complete")
-                        elif self.lines:
-                            self.status("识别到文字，但被内容过滤全部排除；未播放成功提示音。")
+                        self.status("识别到文字，但被内容过滤全部排除；未播放成功提示音。")
                     if source == "selection" and self.mouse_mode == "hover":
                         spoken = filter_speech_text(
                             "\n".join(line.text for line in self.lines), self.settings)
@@ -1730,7 +1732,7 @@ class ReaderApp:
                     self.status("无障碍接口初始化异常：" + event[1])
         except Empty:
             pass
-        self.root.after(40, self.poll_messages)
+        self.root.after(15, self.poll_messages)
 
     def update_scan_frame(self):
         """Render only active mode's outline; no OCR work or mouse capture."""
@@ -1885,7 +1887,7 @@ class ReaderApp:
                     self.start_region_scan()
         except Exception as exc:
             self.status("鼠标／快捷键监听异常：" + str(exc))
-        self.root.after(20, self.poll_input)
+        self.root.after(15, self.poll_input)
 
     def close(self):
         self.closed = True
