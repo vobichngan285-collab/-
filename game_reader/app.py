@@ -146,6 +146,8 @@ class ReaderApp:
         self._region_next_due = float("inf")
         self._region_last_fingerprint = None
         self._region_last_text = ""
+        self._region_prev_lines = []
+        self._region_invalid_reported = False
         self._region_last_window = None
         self._region_border_visible = True
         self._region_force_initial = False
@@ -914,6 +916,10 @@ class ReaderApp:
         self._choosing_region = True
         if getattr(self, "scan_frame", None) is not None:
             self.scan_frame.hide()
+        if getattr(self, "fixed_frame", None) is not None:
+            self.fixed_frame.hide()
+        self._region_job_id = getattr(self, "_region_job_id", 0) + 1
+        self.region_ocr_busy = False
         # Cancel old queued OCR/audio before putting the selection overlay
         # on screen. Any image already being processed must be discarded.
         self.mode_generation += 1
@@ -944,9 +950,19 @@ class ReaderApp:
             except Exception:
                 pass  # Fall back to a semi-transparent overlay if capture fails.
             self._picker_snapshot = background
+            initial = RelativeRegion.from_settings(self.settings["region"])
+            if self.mouse_mode == "region":
+                saved = parse_fixed_region(self.settings.get("fixed_region"),
+                                           self.settings.get("fixed_monitor"))
+                if saved is not None and self._picker_anchor is not None:
+                    dx, dy = self._picker_anchor
+                    try:
+                        initial = RelativeRegion(saved[0]-dx, saved[1]-dy,
+                                                 saved[2]-saved[0], saved[3]-saved[1])
+                    except ValueError:
+                        pass
             self._region_picker = ScreenRegionPicker(
-                self.root, monitor,
-                RelativeRegion.from_settings(self.settings["region"]),
+                self.root, monitor, initial,
                 self._region_picked, background=background,
                 anchor=(self._picker_anchor[0] - monitor[0],
                         self._picker_anchor[1] - monitor[1]))
@@ -975,6 +991,26 @@ class ReaderApp:
             pass
         if region is None:
             self.status("框选已取消，原识别区域未改变。")
+        elif self.mouse_mode == "region":
+            if anchor is None or monitor is None:
+                self.status("无法保存固定区域：显示器信息丢失。")
+                return
+            box = capture_box(region, anchor, monitor)
+            self.settings["fixed_region"] = list(box)
+            self.settings["fixed_monitor"] = list(monitor)
+            self._region_invalid_reported = False
+            self._region_last_fingerprint = None
+            self._region_last_text = ""
+            self._region_prev_lines = []
+            self._region_border_visible = bool(self.settings.get("show_scan_frame", True))
+            self.region_preview_var.set(self.format_fixed_region())
+            self.persist()
+            # The app must not cover the selected game pixels after F11.
+            if self.root.state() == "normal":
+                self.root.iconify()
+            self._region_next_due = time.monotonic()
+            self.update_scan_frame()
+            self.start_region_scan(force=True, snapshot=snapshot)
         else:
             self.settings["region"] = region.as_list()  # All four drag directions.
             self.region_info_var.set(self.format_region(region))
@@ -983,7 +1019,8 @@ class ReaderApp:
             self.persist()
             if anchor is not None and monitor is not None:
                 self._start_selected_ocr(region, anchor, monitor, snapshot, focus)
-        self._hover_next_due = time.monotonic() + self.settings["period_ms"] / 1000.0
+        if self.mouse_mode != "region":
+            self._hover_next_due = time.monotonic() + self.settings["period_ms"] / 1000.0
 
     def _start_selected_ocr(self, region: RelativeRegion, anchor, monitor,
                             snapshot, focus):
