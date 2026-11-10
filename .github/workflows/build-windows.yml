@@ -2,7 +2,7 @@ name: Build Blue Star OCR fixed-region three-mode experiment
 on:
   workflow_dispatch:
   push:
-    branches: ['exp/v12-clean-blue-a11y-filtered-mouse-20261110', 'feat/windows-v12-cursor-drag-clear-speed-20261110', 'feat/windows-v121-cue-cleanui-voice-latency-20261110', 'exp/windows-fixed-region-tracking-20261110', 'feat/windows-game-capture-mouse-clear-speed-20261110']
+    branches: ['exp/v12-clean-blue-a11y-filtered-mouse-20261110', 'feat/windows-v12-cursor-drag-clear-speed-20261110', 'feat/windows-v121-cue-cleanui-voice-latency-20261110', 'exp/windows-fixed-region-tracking-20261110', 'feat/windows-game-capture-mouse-clear-speed-20261110', 'fix/windows-luna-bound-game-window-20261110']
     paths:
       - 'game_reader/**'
       - 'main.py'
