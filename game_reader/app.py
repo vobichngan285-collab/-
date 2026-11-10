@@ -37,6 +37,7 @@ from .hover_modes import (MOUSE_SIDE_VKS, MOUSE_BUTTON_VKS, WHEEL_DOWN,
 from .mouse_input import MouseWheelListener
 from .region_picker import ScreenRegionPicker
 from .foreground import foreground_class, foreground_window_id
+from .game_window import GameWindowBinding
 from .hover_target import centered_region
 from .fixed_region import (parse_fixed_region, parse_monitor, region_on_same_monitor,
                            screenshot_fingerprint, frame_has_changed,
@@ -133,6 +134,7 @@ class ReaderApp:
         self.events: Queue[tuple] = Queue()
         self.lines: list[OCRLine] = []
         self._full_capture_window = None
+        self._game_window = GameWindowBinding()
         self.ocr_worker = LocalOCR()
         self.busy = False
         self.closed = False
@@ -910,6 +912,18 @@ class ReaderApp:
         self.persist()
         self.status(f"悬停 OCR 周期已设为 {period} 毫秒。")
 
+    def _game_capture_target(self):
+        """Pin HWND once, like LunaTranslator ocrtext.hwndChanged()."""
+        binding = getattr(self, "_game_window", None)
+        return binding.target() if binding is not None else 0
+
+    def _game_capture_active(self, captured_hwnd=None):
+        """Game-owned child windows are not treated as leaving the game."""
+        binding = getattr(self, "_game_window", None)
+        if binding is not None and binding.hwnd:
+            return binding.is_active()
+        return not captured_hwnd or foreground_window_id() == captured_hwnd
+
     def select_region(self):
         """Global F11 can open a picker while an unrelated game is foreground.
 
@@ -930,7 +944,7 @@ class ReaderApp:
         self._picker_anchor = anchor
         self._picker_monitor = monitor
         self._picker_snapshot = None
-        self._picker_foreground = foreground_window_id()
+        self._picker_foreground = self._game_capture_target() or foreground_window_id()
         self._choosing_region = True
         if getattr(self, "scan_frame", None) is not None:
             self.scan_frame.hide()
@@ -964,7 +978,8 @@ class ReaderApp:
                     self.overlay.hide()
                 # Screenshot before opening the picker, with our main UI
                 # already invisible. No photo is stored or uploaded.
-                background = grab_game_rect(monitor)
+                background = (grab_game_rect(monitor, self._picker_foreground)
+                              if self._picker_foreground else grab_game_rect(monitor))
             except Exception:
                 pass  # Fall back to a semi-transparent overlay if capture fails.
             self._picker_snapshot = background
@@ -1065,7 +1080,8 @@ class ReaderApp:
                     image = snapshot.crop((box[0]-ml, box[1]-mt,
                                            box[2]-ml, box[3]-mt))
                 else:
-                    image = grab_game_rect(box)
+                    image = (grab_game_rect(box, focus)
+                             if focus else grab_game_rect(box))
                 capture_ms = round((time.monotonic() - started) * 1000)
                 if image.size != (box[2]-box[0], box[3]-box[1]):
                     raise RuntimeError("框选截图尺寸与实际识别区域不一致")
@@ -1283,7 +1299,7 @@ class ReaderApp:
         self._region_job_id += 1
         job = self._region_job_id
         self.region_ocr_busy = True
-        start_focus = foreground_window_id()
+        start_focus = self._game_capture_target() or foreground_window_id()
 
         def work():
             started = time.monotonic()
@@ -1293,7 +1309,8 @@ class ReaderApp:
                     image = snapshot.crop((box[0] - ml, box[1] - mt,
                                            box[2] - ml, box[3] - mt))
                 else:
-                    image = grab_game_rect(box)
+                    image = (grab_game_rect(box, start_focus)
+                             if start_focus else grab_game_rect(box))
                 if image.size != (box[2] - box[0], box[3] - box[1]):
                     raise RuntimeError("固定区域截图尺寸不匹配")
                 sig = screenshot_fingerprint(image)
@@ -1331,8 +1348,8 @@ class ReaderApp:
             return
         if self._fixed_region_box() is None:
             return
-        if not force and focus != foreground_window_id():
-            # Never speak a stale scan captured across a window switch.
+        if not force and not self._game_capture_active(focus):
+            # Ignore unrelated foreground apps; keep game-owned subwindows.
             self._region_last_fingerprint = None
             return
         self._region_last_fingerprint = fingerprint
@@ -1390,6 +1407,7 @@ class ReaderApp:
             self.status("局部 OCR 截图区域错误：" + type(exc).__name__)
             return False
 
+        game_hwnd = self._game_capture_target()
         self.hover_ocr_busy = True
         generation = self.mode_generation
         self._hover_next_due = time.monotonic() + self.settings["period_ms"] / 1000.0
@@ -1397,7 +1415,8 @@ class ReaderApp:
         def work():
             started = time.monotonic()
             try:
-                image = grab_game_rect(box)
+                image = (grab_game_rect(box, game_hwnd)
+                         if game_hwnd else grab_game_rect(box))
                 capture_ms = round((time.monotonic() - started) * 1000)
                 if image.size != (box[2] - box[0], box[3] - box[1]):
                     raise RuntimeError("局部截图尺寸与显示器范围不一致")
@@ -1429,8 +1448,10 @@ class ReaderApp:
         if generation != self.mode_generation or self.mouse_mode != "hover":
             return
         if capture_cursor is not None:
-            if (not cursor_still_near_capture(capture_cursor, get_cursor()) or
-                    foreground_class() != capture_foreground):
+            changed_window = (not self._game_capture_active()
+                              if getattr(self, "_game_window", None) and self._game_window.hwnd
+                              else foreground_class() != capture_foreground)
+            if (not cursor_still_near_capture(capture_cursor, get_cursor()) or changed_window):
                 # Do not read a tooltip whose cursor has already left its
                 # location before OCR finishes. A new frame can catch up.
                 self._hover_last_text = ""
@@ -1549,13 +1570,16 @@ class ReaderApp:
         self.busy = True
         self.read_btn.configure(state="disabled")
         tier = self.settings["tier"]
+        game_hwnd = self._game_capture_target()
 
         def worker():
             started = time.monotonic()
             phase = "截图"
             try:
-                focus = foreground_window_id()
-                image, origin = grab_current_monitor()
+                focus = game_hwnd or foreground_window_id()
+                capture_report = {}
+                image, origin = (grab_current_monitor(game_hwnd, report=capture_report)
+                                 if game_hwnd else grab_current_monitor())
                 captured_at = time.monotonic()
                 capture_ms = round((captured_at - started) * 1000)
                 phase = f"离线OCR推理（{tier}）"
@@ -1570,7 +1594,7 @@ class ReaderApp:
                                  round((time.monotonic() - started) * 1000),
                                  focus, "fullscreen", (capture_ms, infer_ms,
                                  lock_ms, preprocess_ms, engine_ms,
-                                 request_started)))
+                                 request_started, capture_report.get("method", "desktop"))))
             except Exception as exc:
                 self.events.put(("ocr_fail", capture_id,
                                  "phase: " + phase + "\n" +
@@ -1610,6 +1634,7 @@ class ReaderApp:
                             f"按键到完成 {round((time.monotonic()-timings[5])*1000)}ms；"
                             f"截图 {timings[0]}ms，锁等待 {timings[2]}ms，"
                             f"预处理 {timings[3]}ms，模型 {timings[4]}ms；"
+                            f"截图方式 {timings[6] if len(timings) > 6 else '原版'}；"
                             f"结果整理完成，等待提示音请求。")
                         self.status(self.last_full_timing)
                     if (self.mouse_mode == "pointer"
@@ -1811,8 +1836,15 @@ class ReaderApp:
                 # No scene-change detector. Simply discard a screenshot when
                 # the user has switched to another actual Windows window.
                 if (self._full_capture_window and
-                        foreground_window_id() != self._full_capture_window):
-                    self.invalidate("检测到窗口切换，旧 OCR 坐标已清除；按全屏键重新截图。")
+                        not self._game_capture_active(self._full_capture_window)):
+                    # Pause over another application, do not delete the game's
+                    # OCR just because focus temporarily moved during loading.
+                    if self.last_target is not None:
+                        self.speech.stop()
+                    self.last_target = None
+                    self.hover.reset()
+                    if self.overlay is not None:
+                        self.overlay.hide()
                 else:
                     x, y = get_cursor()
                     target = hit_test(self.lines, x, y)
@@ -1835,7 +1867,9 @@ class ReaderApp:
                     moved = not cursor_still_near_capture(
                         self._hover_spoken_cursor, get_cursor())
                     focus_changed = (self._hover_spoken_foreground is not None and
-                                     foreground_class() != self._hover_spoken_foreground)
+                                     not self._game_capture_active()
+                                     if getattr(self, "_game_window", None) and self._game_window.hwnd
+                                     else foreground_class() != self._hover_spoken_foreground)
                     if moved or focus_changed:
                         self.speech.stop()
                         self._hover_spoken_cursor = None
