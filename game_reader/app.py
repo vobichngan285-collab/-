@@ -954,7 +954,7 @@ class ReaderApp:
                 pass  # Fall back to a semi-transparent overlay if capture fails.
             self._picker_snapshot = background
             initial = RelativeRegion.from_settings(self.settings["region"])
-            if self.mouse_mode == "region":
+            if getattr(self, "mouse_mode", "pointer") == "region":
                 saved = parse_fixed_region(self.settings.get("fixed_region"),
                                            self.settings.get("fixed_monitor"))
                 if saved is not None and self._picker_anchor is not None:
