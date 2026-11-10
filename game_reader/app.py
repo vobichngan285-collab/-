@@ -1026,10 +1026,22 @@ class ReaderApp:
                          name="DragSelectionSmallOCR").start()
 
     def toggle_mouse_mode(self):
-        # Startup already defaults to V1.2 pointer mode. Every press MUST
-        # switch, including the first F9 after launching the program.
-        self.mouse_mode = next_mouse_mode(self.mouse_mode)
+        """F9 cycles through the three modes without waiting for double-clicks."""
+        self._switch_mouse_mode(next_mouse_mode(self.mouse_mode))
+
+    def _switch_mouse_mode(self, desired: str):
+        if desired not in ("pointer", "hover", "region"):
+            raise ValueError("未知鼠标模式")
+        if self.mouse_mode == desired:
+            return
+        self.mouse_mode = desired
         self.mode_generation += 1
+        self._region_job_id = getattr(self, "_region_job_id", 0) + 1
+        self.region_ocr_busy = False  # Stale jobs are ignored by job ID.
+        self._region_last_fingerprint = None
+        self._region_last_text = ""
+        self._region_prev_lines = []
+        self._region_next_due = float("inf")
         self._hover_last_text = ""
         self._hover_spoken_cursor = None
         self._hover_spoken_foreground = None
@@ -1040,22 +1052,35 @@ class ReaderApp:
             self.overlay.hide()
         if getattr(self, "scan_frame", None) is not None:
             self.scan_frame.hide()
-        # Announcements are sent unfiltered, through the already-selected
-        # voice. Reserve enough time before OCR can interrupt the short cue.
+        if getattr(self, "fixed_frame", None) is not None:
+            self.fixed_frame.hide()
         announce = bool(self.settings.get("mode_voice_hint", True))
-        self._mode_announcement_until = (
-            time.monotonic() + 1.6 if announce else 0.0)
-        if self.mouse_mode == "hover":
-            self.mouse_mode_var.set("当前：鼠标模式（局部 OCR）")
-            self._hover_next_due = max(
-                time.monotonic() + 0.35, self._mode_announcement_until)
+        self._mode_announcement_until = time.monotonic() + (1.6 if announce else 0)
+        if desired == "hover":
+            self.mouse_mode_var.set("当前：鼠标跟随模式（局部 OCR）")
+            self._hover_next_due = max(time.monotonic() + 0.35,
+                                       self._mode_announcement_until)
             if self.root.state() == "normal":
                 self.root.iconify()
-            self.status("已进入鼠标模式；局部扫描框跟随鼠标。")
+            self.status("已进入鼠标跟随模式。")
             if announce:
-                self.speak_selected("鼠标模式")
+                self.speak_selected("鼠标跟随模式")
+        elif desired == "region":
+            self.mouse_mode_var.set("当前：区域跟踪模式")
+            self._region_border_visible = bool(self.settings.get("show_scan_frame", True))
+            self._region_next_due = time.monotonic() + 0.18
+            if self.root.state() == "normal":
+                self.root.iconify()
+            box = parse_fixed_region(self.settings.get("fixed_region"),
+                                     self.settings.get("fixed_monitor"))
+            self.status("已恢复固定区域，开始跟踪。" if box is not None
+                        else "区域跟踪未设定范围，按 F11 框选。")
+            if announce:
+                self.speak_selected("区域跟踪")
+            # Prompt announcement is not allowed to hold back a new F11 capture.
+            self._mode_announcement_until = time.monotonic() + 0.25
         else:
-            self.mouse_mode_var.set("当前：默认模式（全屏 OCR 文字指向朗读）")
+            self.mouse_mode_var.set("当前：默认模式（全屏 OCR 指向朗读）")
             self._hover_next_due = float("inf")
             self.update_output("\n".join(line.text for line in self.lines))
             self.status("已切换到默认模式。")
