@@ -1,5 +1,15 @@
 # Windows 游戏文字助手｜当前交接（2026-11-10 · 区域跟踪实验版）
 
+## 最新进展｜2026-11-10 真实《七日杀》跨菜单朗读故障：固定游戏 HWND 修复实验版（已构建/发布）
+
+- **用户发现的实际问题：** 新版在《七日杀》游戏首页「开始游戏/继续游戏/设置」可以 OCR 朗读，但点击「开始游戏」进入另一页面后，F8 有「叮」声、鼠标指向读不出当前页面文字。用户确认故障与滚轮无关，并指出游戏窗口自身未变；要求直接参照 LunaTranslator 的持久绑定游戏窗口思路，不重新设计 OCR/TTS。
+- **原因与修复定位：** 上一版虽然参考了原版 `screenshot.cpp` 的 GDI/BitBlt，却缺少 `ocrtext.py` 中保存 `self.hwnd`、后续重复向 `imageCutEx(self.ref.hwnd, rect)` 提供同一窗口句柄的关键调用链；旧版仍每次捕获重新读取 GetForegroundWindow，并在前台 HWND 不同后立即清除旧 OCR。新增 `game_reader/game_window.py` 的 GameWindowBinding，首次在游戏里 OCR 时绑定外部游戏 HWND+PID；只要原 HWND 对应进程仍存在就不因为加载页/其他前台变化自动重绑；窗口关闭或 HWND 被回收时才释放与重新绑定。保留绑定窗口内不同子窗口同 PID 的活跃判断，失去游戏前台焦点时暂停鼠标朗读、保留已识别文字直至下次 OCR/TTL，而非直接清除。
+- **接入范围：** `game_reader/app.py` 的 F8 全屏、F11 框选、鼠标跟随、固定区域连续识别统一传入同一绑定 HWND，实际像素每次重新截图而非缓存；`game_reader/win_screen.py` 截图函数新增可选固定 HWND；`game_reader/luna_capture.py` 沿用原 HWND 优先 GDI、失败回退 ImageGrab，并增加截图方式 `window_gdi` / `desktop` 纯元数据用于 F8 状态诊断。未改 Small OCR 权重、语音 DLL、原版微软云希/晓晓对接、滚轮键及三个模式的清除行为。
+- **代码隔离：** 原 GitHub 仓库 https://github.com/vobichngan285-collab/-；新独立修复分支 `fix/windows-luna-bound-game-window-20261110`。**实际编译源码 HEAD `44c19d3043d52d5d673b03f46f8e5e63b6e92d68`**；发布脚本后续分支 Commit `08b5c97f164ce53187dceaa0fd5d243cb8fc72aa`，切勿混淆。上个版本分支不覆盖。
+- **Windows CI：** [run 42800465082](https://github.com/vobichngan285-collab/-/actions/runs/42800465082) completed/success，**121 passed，1 warning，0 failed**；PyInstaller EXE 真正运行 Small OCR、语音 worker、UIA 无障碍控件、F11 三次真实 picker、应用自测等成功。之前 run 42800251220 因测试文件缺失 SimpleNamespace import，120 passed/1 failed，现已修复，不是产品故障。
+- **GitHub 公开发布：** [run 42800815029](https://github.com/vobichngan285-collab/-/actions/runs/42800815029) completed/success；[Release win-game-bound-20261110](https://github.com/vobichngan285-collab/-/releases/tag/win-game-bound-20261110)，公开 prerelease、非草稿。Windows **单层** ZIP `BlueStarOCR_GameWindowBound_Windows_x64.zip`，130294928 bytes，SHA256 `c819f19aac8e97cd52889d68a70b5e951ec37665227f2f45215f057dfa22c913`，直接地址 https://github.com/vobichngan285-collab/-/releases/download/win-game-bound-20261110/BlueStarOCR_GameWindowBound_Windows_x64.zip；本项目源码 ZIP `BlueStarOCR_GameWindowBound_Source.zip` 130066 bytes，SHA256 `0fde30e7e76d112b16b5dcd0be92e22864321dde5c40d0afdbd4ba1c0297c186`，原版 Luna GPLv3 源码仍随便携包提供。ZIP CRC/EXE/源码检查通过，私人 `config..json` 不公开。
+- **仍未解决/用户验收：** **不能保证《七日杀》切换页面后已经正常朗读，必须在用户 Windows 真机再试**；特别注意即使 HWND 固定，GDI 也可能在某些 DirectX/Vulkan 渲染场景返回旧帧，光标位置也可能来自游戏自绘鼠标而非系统坐标。新版 F8 诊断包含 `window_gdi` 或 `desktop`，若仍有叮声却读不到当前页面文字，下一步仅针对该截图来源问题排查，不重构已工作的语音/识别，不归咎滚轮。
+
 ## 最新进展｜2026-11-10 Windows 游戏窗口截图 + 鼠标滚轮智能清除 + 全屏计时（独立实验版构建与公开发布成功）
 
 - **项目和隔离：** 唯一优先为 Windows 11 游戏 OCR（非安卓）。原仓库 https://github.com/vobichngan285-collab/- 。原固定区域实验版本和稳定版保留；本轮新独立分支 `feat/windows-game-capture-mouse-clear-speed-20261110`，目前发布工作流修复后的分支 HEAD `07f8e60aad103c9a0021f71fa2e47ea315a9bfdf`。**实际被 Windows runner 编译的应用源码 Commit 是 `31a92b90c43f15bfe0d817cd7d044a2344803ca4`**；后续为许可证说明和发布工作流，不能误认为另一个 EXE 编译版。
