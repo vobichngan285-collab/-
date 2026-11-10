@@ -6,6 +6,7 @@ Only explicit, bundled file paths are allowed. No runtime model downloads.
 from __future__ import annotations
 import math
 import sys
+import time
 from pathlib import Path
 import numpy as np
 from .core import OCRLine
@@ -48,6 +49,8 @@ class LocalOCR:
     def __init__(self):
         self.loaded_tier = None
         self.engine = None
+        self.last_preprocess_ms = 0
+        self.last_engine_ms = 0
 
     def recognize(self, image, origin: tuple[int, int], tier: str) -> list[OCRLine]:
         if tier not in TIERS:
@@ -69,5 +72,11 @@ class LocalOCR:
                 "Rec.model_path": str(rec),
             })
             self.loaded_tier = tier
-        result = self.engine(np.asarray(image.convert("RGB")), use_cls=False)
+        t0 = time.monotonic()
+        # ImageGrab/GDI already return RGB; avoid an unnecessary full-frame copy.
+        pixels = np.asarray(image if image.mode == "RGB" else image.convert("RGB"))
+        t1 = time.monotonic()
+        result = self.engine(pixels, use_cls=False)
+        self.last_preprocess_ms = round((t1 - t0) * 1000)
+        self.last_engine_ms = round((time.monotonic() - t1) * 1000)
         return rapid_result_lines(result, origin)
