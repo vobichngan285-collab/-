@@ -1,4 +1,15 @@
-# Windows 游戏文字助手｜当前交接（2026-11-09 · V2.0 原版 Luna）
+# Windows 游戏文字助手｜当前交接（2026-11-10 · V1.2.1）
+
+## 最新进展｜2026-11-10 V1.2.1 提示音、界面精简与鼠标语音提速（已构建）
+
+- **主项目：** Windows Blue Star OCR 游戏文字朗读助手；安卓蓝星向导继续搁置。原仓库 `vobichngan285-collab/-`，未创建新仓库，未覆盖旧分支或旧安装包。
+- **源码分支/实际构建 Commit：** `feat/windows-v121-cue-cleanui-voice-latency-20261110` / `997ade1552d097917b8a3121b963c4b45d6844fb`。从上版 `d5720f6924471200b3f2b68cc5a42a7c74f7c653` 延续。
+- **用户授权修复：** 默认模式识别出过滤后可朗读文字时播放更清脆的成功叮声；从共用 winsound 改为专用 waveOut 异步后台播放，避免打断 Luna 音频；新增可读屏「试听叮声」和失败诊断；删除设置页多处重复小字说明、保留必要状态和 UIA。
+- **语音低风险提速：** 鼠标跨文字区域时取消多余 stop 命令；不同短文字继续立即抢占；微软原版 Luna 不修改，增加仅 RAM 里 60 秒有效的 16 条/4MB 上限短文本合成 WAV 缓存，清除 OCR/过期会清缓存；重复短物品文字可重用音频。首次合成仍受微软引擎速度限制，尚无用户本机实测加速数据。
+- **不改动：** PP-OCRv6 Small、F11 鼠标自由拖框与松手识别、F6 可自定义清除及 60 秒过期、原版 Luna 执行文件与语音配置、无障碍设置架构。不增加双击侧键（会延迟单击识别，用户明确取消）。
+- **GitHub Windows CI：** [run 42754662061](https://github.com/vobichngan285-collab/-/actions/runs/42754662061) `completed/success`，**93 passed、1 warning、0 failed**；冻结 EXE、Small 模型实测、SAPI/WinRT、原版 Luna 版本/哈希、持久语音 worker、可点击穿透绿色框、3 次 F11 Tk 框选、完整应用启动、UIA Strategy.PROVIDED 与**38 个原生命名控件**全部通过。
+- **下载：** [artifact 13735420785](https://github.com/vobichngan285-collab/-/actions/runs/42754662061/artifacts/13735420785)，名称 `GameTextReader-V1.2.1-Cue-CleanUI-FastVoice`，129822675 字节，2026-12-10T04:17:15Z 到期；ZIP 中为 `GameTextReader_V1.2.1_Cue_CleanUI_FastVoice_Windows_x64.zip`。仅官方公共依赖与模型，不附用户私人 `config..json`。
+- **尚待真机验证：** 用户电脑能否从「试听叮声」听到音效、游戏音量混合器/输出设备、过滤英文数字设置、自然语音云希晓晓真实发声与鼠标切换实际延迟。CI 无声卡听觉验收，不应声称真实响铃或具体提速百分比。继续从本分支定点修复，不重做旧实验。
 
 ## 最新进展｜2026-11-10 Windows Blue Star OCR 清脆提示、自由框选、手动清除及速度修复（已构建）
 
