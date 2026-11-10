@@ -1,8 +1,8 @@
-name: Build Blue Star OCR pointer-drag clearing and low-latency experiment
+name: Build Blue Star OCR V1.2.1 audible cue clean UI and fast mouse voice
 on:
   workflow_dispatch:
   push:
-    branches: ['exp/v12-clean-blue-a11y-filtered-mouse-20261110', 'feat/windows-v12-cursor-drag-clear-speed-20261110']
+    branches: ['exp/v12-clean-blue-a11y-filtered-mouse-20261110', 'feat/windows-v12-cursor-drag-clear-speed-20261110', 'feat/windows-v121-cue-cleanui-voice-latency-20261110']
     paths:
       - 'game_reader/**'
       - 'main.py'
@@ -262,12 +262,12 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory release -Force | Out-Null
-          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_V12_CursorDrag_ClearKey_FastOCR_Windows_x64.zip -CompressionLevel Optimal -Force
-          $size = (Get-Item release/GameTextReader_V12_CursorDrag_ClearKey_FastOCR_Windows_x64.zip).Length
+          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_V1.2.1_Cue_CleanUI_FastVoice_Windows_x64.zip -CompressionLevel Optimal -Force
+          $size = (Get-Item release/GameTextReader_V1.2.1_Cue_CleanUI_FastVoice_Windows_x64.zip).Length
           Write-Output "Portable archive size: $size bytes"
       - uses: actions/upload-artifact@v4
         with:
-          name: GameTextReader-V12-CursorDrag-ClearKey-FastOCR
-          path: release/GameTextReader_V12_CursorDrag_ClearKey_FastOCR_Windows_x64.zip
+          name: GameTextReader-V1.2.1-Cue-CleanUI-FastVoice
+          path: release/GameTextReader_V1.2.1_Cue_CleanUI_FastVoice_Windows_x64.zip
           if-no-files-found: error
           retention-days: 30
