@@ -1,0 +1,78 @@
+name: Publish Windows bound game-window bugfix ZIP
+on:
+  push:
+    branches:
+      - fix/windows-luna-bound-game-window-20261110
+    paths:
+      - .github/workflows/publish-pinned-window-fix.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish-verified-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout built source for GPL source archive
+        uses: actions/checkout@v4
+        with:
+          ref: 44c19d3043d52d5d673b03f46f8e5e63b6e92d68
+          persist-credentials: false
+      - name: Download confirmed successful Windows EXE artifact
+        uses: actions/download-artifact@v4
+        with:
+          run-id: 42800465082
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          name: GameTextReader-FixedRegion-ThreeModes-Experimental
+          path: incoming
+      - name: Verify Windows inner ZIP and bundle complete source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          file="incoming/GameTextReader_FixedRegion_ThreeModes_Experimental_Windows_x64.zip"
+          test -s "$file"
+          test "$(stat -c%s "$file")" -gt 120000000
+          cp "$file" release/BlueStarOCR_GameWindowBound_Windows_x64.zip
+          unzip -t release/BlueStarOCR_GameWindowBound_Windows_x64.zip | tail -n 2
+          unzip -Z1 release/BlueStarOCR_GameWindowBound_Windows_x64.zip | grep -q '^GameTextReader/GameTextReader.exe$'
+          unzip -Z1 release/BlueStarOCR_GameWindowBound_Windows_x64.zip | grep -q 'UPSTREAM_LUNA_GPL_SOURCE_v12.1.3.9.zip'
+          git archive --format=zip --output=release/BlueStarOCR_GameWindowBound_Source.zip HEAD
+          unzip -t release/BlueStarOCR_GameWindowBound_Source.zip | tail -n 2
+          unzip -Z1 release/BlueStarOCR_GameWindowBound_Source.zip | grep -q '^game_reader/game_window.py$'
+          sha256sum release/*.zip
+          echo "PASS: Windows source commit 31a92b90; 121 automated tests; release ZIP CRC and source checks"
+      - name: Publish original ZIP as a public single-layer prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > notes.txt <<'EOF'
+          Windows 11 x64 Blue Star OCR: stable Luna-style game HWND binding across menus and gameplay screens.
+          Built from 44c19d3043d52d5d673b03f46f8e5e63b6e92d68.
+          Windows CI run 42800465082: 121 tests passed, frozen OCR, Luna voice worker, accessibility/UIA and F11 picker smoke tests passed.
+          Fix: capture from the initially bound live game HWND across menu transitions; preserve OCR results across transient focus/child-window changes; each F8 captures a fresh frame; report HWND GDI vs desktop fallback. All existing wheel, Small OCR and Luna speech code is unchanged.
+          Single-level ZIP: extract to a NEW folder and run GameTextReader/GameTextReader.exe.
+          The second asset contains the corresponding source code; original upstream LunaTranslator GPLv3 source remains bundled in the main ZIP.
+          Do not overwrite existing versions or your private config..json. No private voice config/credentials are included.
+          Gameplay compatibility (especially 7 Days to Die after pressing Start Game, and Red Dead Redemption 2), mouse hit testing and actual natural voice audio still require user verification.
+          LunaTranslator source and GPLv3 license: https://github.com/HIllya51/LunaTranslator/tree/v12.1.3.9
+          EOF
+          gh release create "win-game-bound-20261110" \
+            release/BlueStarOCR_GameWindowBound_Windows_x64.zip \
+            release/BlueStarOCR_GameWindowBound_Source.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "44c19d3043d52d5d673b03f46f8e5e63b6e92d68" \
+            --title "Blue Star OCR - Persistent Game Window Fix (Windows Experimental)" \
+            --prerelease --notes-file notes.txt
+      - name: Verify public release and source assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view "win-game-bound-20261110" --repo "$GITHUB_REPOSITORY" \
+             --json isDraft,isPrerelease,assets,url --jq '{isDraft,isPrerelease,url,assets: [.assets[] | {name: .name, size: .size, url: .url}]}'
