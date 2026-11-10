@@ -1,0 +1,62 @@
+name: Diagnose public Release asset download route
+on:
+  push:
+    branches:
+      - exp/windows-fixed-region-tracking-20261110
+    paths:
+      - '.github/workflows/diagnose-release-download.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Test direct download redirect and first 8 MiB transfer
+        env:
+          RELEASE_URL: https://github.com/vobichngan285-collab/-/releases/download/win-region-experiment-20261110/BlueStarOCR_RegionTracking_Windows_x64.zip
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, time, urllib.request, urllib.parse, urllib.error
+          url = os.environ["RELEASE_URL"]
+          class Tracing(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, hdrs, newurl):
+                  print("Redirect:", code,
+                        urllib.parse.urlsplit(req.full_url).hostname, "->",
+                        urllib.parse.urlsplit(newurl).hostname, flush=True)
+                  return super().redirect_request(req, fp, code, msg, hdrs, newurl)
+          opener = urllib.request.build_opener(Tracing())
+          for method in ("HEAD", "GET"):
+              headers={"User-Agent":"BlueStarOCR-route-diagnostic/1.0"}
+              if method=="GET":
+                  headers["Range"]="bytes=0-8388607"
+              request = urllib.request.Request(url, headers=headers, method=method)
+              started=time.perf_counter()
+              try:
+                  with opener.open(request, timeout=40) as response:
+                      print("Method", method, "status",response.status,"final_host",
+                            urllib.parse.urlsplit(response.url).hostname,
+                            "content-type",response.headers.get("Content-Type"),
+                            "content-length",response.headers.get("Content-Length"),
+                            "accept-ranges",response.headers.get("Accept-Ranges"),
+                            "content-range",response.headers.get("Content-Range"),
+                            "time-to-first-byte",round(time.perf_counter()-started,3),
+                            flush=True)
+                      if method=="GET":
+                          count=0
+                          while count < 8*1024*1024:
+                              chunk=response.read(min(262144,8*1024*1024-count))
+                              if not chunk:break
+                              count+=len(chunk)
+                          elapsed=time.perf_counter()-started
+                          print("Probe",count,"bytes in",round(elapsed,2),
+                                "seconds; MBps",round(count/1e6/elapsed,2),
+                                flush=True)
+              except Exception as ex:
+                  print("FAILED",method,type(ex).__name__,str(ex)[:150],flush=True)
+                  raise
+          PY
