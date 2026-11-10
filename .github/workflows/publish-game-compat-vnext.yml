@@ -15,6 +15,11 @@ jobs:
   publish-verified-portable:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout built source for GPL source archive
+        uses: actions/checkout@v4
+        with:
+          ref: 31a92b90c43f15bfe0d817cd7d044a2344803ca4
+          persist-credentials: false
       - name: Download confirmed successful Windows EXE artifact
         uses: actions/download-artifact@v4
         with:
@@ -22,11 +27,6 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           name: GameTextReader-FixedRegion-ThreeModes-Experimental
           path: incoming
-      - name: Checkout built source for GPL source archive
-        uses: actions/checkout@v4
-        with:
-          ref: 31a92b90c43f15bfe0d817cd7d044a2344803ca4
-          persist-credentials: false
       - name: Verify Windows inner ZIP and bundle complete source
         shell: bash
         run: |
