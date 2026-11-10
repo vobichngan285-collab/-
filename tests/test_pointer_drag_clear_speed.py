@@ -43,7 +43,7 @@ def test_saved_region_keeps_offset_and_all_five_shortcuts_migrate(tmp_path, monk
     monkeypatch.setattr(module, "CONFIG_PATH", settings_file)
     settings = module.read_settings()
     assert settings["region"] == [165, -105, 550, 300]
-    assert settings["clear_vk"] == 0x75
+    assert settings["clear_vk"] == -1002
     assert settings["success_cue"] is True
     assert len({settings[k] for k in
                 ("vk", "mode_vk", "local_vk", "pick_vk", "clear_vk")}) == 5
