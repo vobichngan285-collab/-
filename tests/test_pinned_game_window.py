@@ -76,19 +76,86 @@ def test_every_luna_capture_is_fresh_and_provenance_is_reported(monkeypatch):
     assert report3 == {"method": "desktop", "bound_hwnd": True}
 
 
-def test_full_screen_uses_saved_hwnd_even_if_foreground_is_another_window(monkeypatch):
+def test_full_screen_uses_bound_game_rect_and_always_reads_fresh_desktop(monkeypatch):
     from game_reader import win_screen
-    binder = GameWindowBinding(foreground=lambda: 111,
-                               process_id=lambda hwnd: {111: 34}.get(hwnd, 0),
-                               own_pid=99)
-    bound = binder.target()
+    binding = GameWindowBinding(foreground=lambda: 111,
+                                process_id=lambda hwnd: {111: 34}.get(hwnd, 0),
+                                own_pid=99)
+    bound = binding.target()
     assert bound == 111
-    captured = []
+    shots = []
     monkeypatch.setattr(win_screen, "monitor_rect_at_cursor", lambda: (0, 0, 640, 480))
-    def fake_capture(box, hwnd, report=None):
-        captured.append((box, hwnd))
-        return Image.new("RGB", (640, 480), "gray")
-    monkeypatch.setattr(win_screen, "capture_rect", fake_capture)
+    monkeypatch.setattr(win_screen, "game_client_rect",
+                        lambda hwnd: (10, 20, 500, 400) if hwnd == bound else None)
+
+    # Simulate the user opening 'Start Game': same HWND, NEW visible pixels.
+    def desktop_capture(**kwargs):
+        shots.append(kwargs)
+        scene_color = "navy" if len(shots) == 1 else "yellow"
+        return Image.new("RGB", (490, 380), scene_color)
+    monkeypatch.setattr(win_screen.ImageGrab, "grab", desktop_capture)
+    metadata1, metadata2 = {}, {}
+    first, origin1 = win_screen.grab_current_monitor(bound, report=metadata1)
+    second, origin2 = win_screen.grab_current_monitor(bound, report=metadata2)
+    assert origin1 == origin2 == (10, 20)
+    assert first.getpixel((20, 20)) != second.getpixel((20, 20))
+    assert first.size == second.size == (490, 380)
+    assert shots == [{"bbox": (10, 20, 500, 400), "all_screens": True}] * 2
+    assert metadata1["method"] == metadata2["method"] == "desktop_game_client"
+    assert metadata1["bound_hwnd"] is metadata2["bound_hwnd"] is True
+
+
+def test_no_bound_game_preserves_original_v12_full_monitor(monkeypatch):
+    from game_reader import win_screen
+    monkeypatch.setattr(win_screen, "monitor_rect_at_cursor",
+                        lambda: (-1920, 0, 0, 1080))
+    seen = []
+    monkeypatch.setattr(win_screen.ImageGrab, "grab",
+                        lambda **kw: seen.append(kw) or Image.new("RGB", (1920, 1080)))
     report = {}
-    assert win_screen.grab_current_monitor(bound, report=report)[1] == (0, 0)
-    assert captured == [((0, 0, 640, 480), 111)]
+    image, origin = win_screen.grab_current_monitor(report=report)
+    assert image.size == (1920, 1080) and origin == (-1920, 0)
+    assert seen == [{"bbox": (-1920, 0, 0, 1080), "all_screens": True}]
+    assert report["method"] == "desktop_monitor"
+
+
+def test_window_onto_monitor_is_intersected_without_fake_window_pixels(monkeypatch):
+    from game_reader import win_screen
+    monkeypatch.setattr(win_screen, "monitor_rect_at_cursor",
+                        lambda: (0, 0, 1920, 1080))
+    monkeypatch.setattr(win_screen, "game_client_rect", lambda hwnd: (-100, -20, 1300, 900))
+    calls = []
+    monkeypatch.setattr(win_screen.ImageGrab, "grab",
+                        lambda **kw: calls.append(kw) or Image.new("RGB", (1300, 900)))
+    image, origin = win_screen.grab_current_monitor(7)
+    assert image.size == (1300, 900) and origin == (0, 0)
+    assert calls == [{"bbox": (0, 0, 1300, 900), "all_screens": True}]
+
+
+def test_minimized_or_other_monitor_game_reports_error_not_success(monkeypatch):
+    import pytest
+    from game_reader import win_screen
+    monkeypatch.setattr(win_screen, "monitor_rect_at_cursor",
+                        lambda: (0, 0, 1920, 1080))
+    monkeypatch.setattr(win_screen, "game_client_rect", lambda hwnd: None)
+    monkeypatch.setattr(win_screen.ImageGrab, "grab",
+                        lambda **kwargs: (_ for _ in ()).throw(AssertionError("should not grab")))
+    with pytest.raises(RuntimeError, match="游戏窗口"):
+        win_screen.grab_current_monitor(7)
+    monkeypatch.setattr(win_screen, "game_client_rect",
+                        lambda hwnd: (2500, 0, 3000, 500))
+    with pytest.raises(RuntimeError, match="不重叠"):
+        win_screen.grab_current_monitor(7)
+
+
+def test_hover_and_fixed_region_are_direct_desktop_crops(monkeypatch):
+    from game_reader import win_screen, luna_capture
+    observed = []
+    monkeypatch.setattr(luna_capture, "_gdi_window_box",
+                        lambda *args: (_ for _ in ()).throw(AssertionError("GDI prohibited")))
+    box = (20, 40, 260, 180)
+    monkeypatch.setattr(win_screen.ImageGrab, "grab",
+                        lambda **kwargs: observed.append(kwargs) or Image.new("RGB", (240, 140)))
+    image = win_screen.grab_game_rect(box, bound_hwnd=123)
+    assert image.size == (240, 140)
+    assert observed == [{"bbox": box, "all_screens": True}]
