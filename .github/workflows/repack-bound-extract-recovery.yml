@@ -1,0 +1,213 @@
+name: Repack Windows GameTextReader clean ZIP and 7z - no rebuild
+on:
+  push:
+    branches:
+      - pack/windows-bound-zip-7z-recovery-20261110
+    paths:
+      - '.github/workflows/repack-bound-extract-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  repack-verified-exe:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout repository metadata at same Windows source commit
+        uses: actions/checkout@v4
+        with:
+          ref: 44c19d3043d52d5d673b03f46f8e5e63b6e92d68
+          persist-credentials: false
+
+      - name: Download exact successful Windows artifact, not a new EXE
+        uses: actions/download-artifact@v4
+        with:
+          run-id: 42800465082
+          github-token: ${{ github.token }}
+          name: GameTextReader-FixedRegion-ThreeModes-Experimental
+          path: incoming
+
+      - name: Verify and safely extract Windows EXE folder
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile, hashlib, stat
+          original = Path("incoming/GameTextReader_FixedRegion_ThreeModes_Experimental_Windows_x64.zip")
+          assert original.is_file(), "Inner zip missing from successful Windows artifact"
+          assert original.stat().st_size == 130294928, "Wrong/partial original Windows ZIP size"
+          digest = hashlib.file_digest(open(original, "rb"), "sha256").hexdigest()
+          expected = "c819f19aac8e97cd52889d68a70b5e951ec37665227f2f45215f057dfa22c913"
+          assert digest == expected, f"Original package digest mismatch {digest}"
+          root = Path("portable")
+          root.mkdir()
+          with zipfile.ZipFile(original) as z:
+              assert z.testzip() is None, "Source ZIP has corrupted entries"
+              members = z.infolist()
+              files = [m for m in members if not m.is_dir()]
+              assert len(files) > 700, "Too few files inside Windows app"
+              names = {m.filename for m in files}
+              required = [
+                  "GameTextReader/GameTextReader.exe",
+                  "GameTextReader/LunaSubprocess64.exe",
+                  "GameTextReader/UPSTREAM_LUNA_GPL_SOURCE_v12.1.3.9.zip",
+              ]
+              for path in required:
+                  assert path in names, f"Expected app file missing: {path}"
+              assert any(p.endswith("/models/PP-OCRv6_det_small.onnx") for p in names)
+              assert any(p.endswith("/models/PP-OCRv6_rec_small.onnx") for p in names)
+              assert not any(p.lower().endswith("config..json") for p in names), "Private config must not ship"
+              assert not any("/models/" in p and "medium" in p.lower() for p in names), "Medium OCR incorrectly included"
+              for m in members:
+                  p = Path(m.filename)
+                  assert not p.is_absolute() and not any(x in ("..", "") for x in p.parts), f"Unsafe path: {m.filename}"
+                  assert m.filename.startswith("GameTextReader/"), f"Not a single-layer portable app: {m.filename}"
+                  assert not stat.S_ISLNK(m.external_attr >> 16), f"Symlink is not permitted: {m.filename}"
+                  if m.file_size > 1000 * 1024 * 1024:
+                      raise ValueError("Unexpectedly large file entry")
+              z.extractall(root)
+          assert (root / "GameTextReader/GameTextReader.exe").is_file()
+          assert len(files) > 700
+          print("SOURCE_ZIP_SHA256", digest)
+          print("SOURCE_FILE_COUNT",len(files))
+          print("LONGEST_RELATIVE_ENTRY", max(len(x) for x in names))
+          print("PASS original Windows EXE, Small OCR models, Luna worker, GPL source, no user config")
+          PY
+
+      - name: Build two NEW single-layer archive formats for Windows
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get -qq update
+          sudo apt-get -qq install -y p7zip-full
+          mkdir -p release
+          cat > portable/GameTextReader/README_EXTRACT_FIRST.txt <<'EOF'
+          Blue Star GameTextReader - Windows 11 64-bit portable tool
+          IMPORTANT: This is an already-built EXE, repackaged without changes to OCR/TTS.
+          1) Extract the entire GameTextReader folder to a short path e.g. C:\BlueStarOCR\
+          2) Open C:\BlueStarOCR\GameTextReader\GameTextReader.exe
+          3) Do NOT run EXE inside ZIP; do NOT overwrite a working older version.
+          4) If Windows Explorer cannot extract, use the separate .7z archive with 7-Zip.
+          5) For incomplete downloads check SHA256 listed in Release notes and SHA256SUMS.txt.
+          6) Your private config..json / voice keys are NOT part of this archive.
+          Original Windows EXE source: 44c19d3043d52d5d673b03f46f8e5e63b6e92d68
+          Original built EXE run: 42800465082 (121 tests passed).
+          EOF
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile
+          root = Path("portable")
+          archive = Path("release/BlueStarOCR_GameTextReader_Windows_ExtractFix_Store.zip")
+          # ZIP_STORED is oldest ZIP method, supported by built-in Windows Explorer.
+          # Recreating every ZIP entry avoids reuse of potentially malformed headers
+          # while preserving Windows application files byte-for-byte.
+          with zipfile.ZipFile(archive,"w",compression=zipfile.ZIP_STORED,allowZip64=True) as out:
+              for source in sorted((root/"GameTextReader").rglob("*")):
+                  if source.is_file():
+                      out.write(source, source.relative_to(root).as_posix())
+          assert zipfile.is_zipfile(archive)
+          with zipfile.ZipFile(archive) as test:
+              assert test.testzip() is None, "New ZIP CRC check failed"
+              names=test.namelist()
+              assert "GameTextReader/GameTextReader.exe" in names
+              assert "GameTextReader/README_EXTRACT_FIRST.txt" in names
+          print("REBUILT_STORED_ZIP", archive.stat().st_size)
+          PY
+          (cd portable && 7z a -t7z -mx=3 -mmt=2 \
+              ../release/BlueStarOCR_GameTextReader_Windows_ExtractFix_7Zip.7z \
+              GameTextReader >/dev/null)
+          7z t release/BlueStarOCR_GameTextReader_Windows_ExtractFix_7Zip.7z | tail -n 9
+
+      - name: Verify both archives independently and compare original Windows EXE binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,zipfile
+          folder=Path("portable/GameTextReader")
+          newzip=Path("release/BlueStarOCR_GameTextReader_Windows_ExtractFix_Store.zip")
+          with zipfile.ZipFile(newzip) as out:
+              assert out.testzip() is None
+              for file in folder.rglob("*"):
+                  if not file.is_file(): continue
+                  rel=file.relative_to("portable").as_posix()
+                  expected=hashlib.file_digest(open(file,"rb"),"sha256").hexdigest()
+                  actual=hashlib.sha256(out.read(rel)).hexdigest()
+                  assert actual==expected, f"ZIP changed a file: {rel}"
+              assert len(out.namelist())>700
+          print("PASS every ZIP file byte-for-byte matched extracted tested source")
+          PY
+          mkdir -p extracted7z
+          7z x -oextracted7z release/BlueStarOCR_GameTextReader_Windows_ExtractFix_7Zip.7z >/dev/null
+          test -f extracted7z/GameTextReader/GameTextReader.exe
+          test -f extracted7z/GameTextReader/LunaSubprocess64.exe
+          test -f extracted7z/GameTextReader/UPSTREAM_LUNA_GPL_SOURCE_v12.1.3.9.zip
+          cmp portable/GameTextReader/GameTextReader.exe extracted7z/GameTextReader/GameTextReader.exe
+          cmp portable/GameTextReader/LunaSubprocess64.exe extracted7z/GameTextReader/LunaSubprocess64.exe
+          cmp portable/GameTextReader/UPSTREAM_LUNA_GPL_SOURCE_v12.1.3.9.zip extracted7z/GameTextReader/UPSTREAM_LUNA_GPL_SOURCE_v12.1.3.9.zip
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          a,b=Path("portable/GameTextReader"),Path("extracted7z/GameTextReader")
+          aa={p.relative_to(a) for p in a.rglob("*") if p.is_file()}
+          bb={p.relative_to(b) for p in b.rglob("*") if p.is_file()}
+          assert aa==bb, f"7z file list mismatch {len(aa)} vs {len(bb)}"
+          for rel in aa:
+              h=lambda p:hashlib.file_digest(open(p,"rb"),"sha256").digest()
+              assert h(a/rel)==h(b/rel), f"7z file changed: {rel}"
+          print("PASS ALL 7z extracted bytes and file count",len(aa))
+          PY
+          (cd release && sha256sum *.zip *.7z > SHA256SUMS.txt)
+          cat release/SHA256SUMS.txt
+          du -h release/*
+          echo "Original built source: 44c19d3043d52d5d673b03f46f8e5e63b6e92d68" >> "$GITHUB_STEP_SUMMARY"
+          echo "Windows original automated test result: 121 passed." >> "$GITHUB_STEP_SUMMARY"
+          cat release/SHA256SUMS.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish NEW verified recovery files; preserve previous releases
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat > notes.txt <<'EOF'
+          Windows 11 x64 GameTextReader: freshly repacked two-format extraction recovery.
+          THIS IS THE SAME TESTED WINDOWS EXE as the last Game Window Bound release.
+          Original source SHA 44c19d3043d52d5d673b03f46f8e5e63b6e92d68.
+          Original Windows CI run 42800465082: 121 tests passed.
+          No OCR, Small model, speech, mouse wheel, game-bound HWND, or other program code was modified.
+          All source archive entries CRC-checked and complete; re-packed every file and
+          verified SHA256 byte-for-byte in both new extractions, including DLLs, EXE, models, original Luna GPL source.
+          FIRST try Store.zip with Windows built-in right-click Extract All;
+          if it fails, choose the alternative 7Zip.7z and use 7-Zip's Extract command.
+          Archive contains one GameTextReader/ program directory; run GameTextReader/GameTextReader.exe AFTER extraction.
+          Extract to a new SHORT folder e.g. C:\BlueStarOCR\ (not within your Downloads archive viewer).
+          SHA256 checksums included in SHA256SUMS.txt; an interrupted download will still fail extraction.
+          No private voice license/config..json or user file included. Old Releases remain unchanged.
+          Real game and natural TTS playback are still to be verified on the user's Windows PC.
+          EOF
+          gh release create "win-game-bound-repack-zip7z-20261110" \
+            release/BlueStarOCR_GameTextReader_Windows_ExtractFix_Store.zip \
+            release/BlueStarOCR_GameTextReader_Windows_ExtractFix_7Zip.7z \
+            release/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" --target "44c19d3043d52d5d673b03f46f8e5e63b6e92d68" \
+            --title "Blue Star OCR Windows GameTextReader - re-extract clean ZIP and 7z" \
+            --prerelease --notes-file notes.txt
+
+      - name: Verify published URL/size and retained source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view win-game-bound-repack-zip7z-20261110 \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isDraft,isPrerelease,assets,url \
+            --jq '{isDraft,isPrerelease,url,assets: [.assets[] | {name: .name, size: .size, url: .url}]}'
+          test "$(gh release view win-game-bound-repack-zip7z-20261110 --repo "$GITHUB_REPOSITORY" \
+             --json assets --jq '.assets | length')" -eq 3
