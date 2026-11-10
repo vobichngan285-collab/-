@@ -143,7 +143,7 @@ class ReaderApp:
         self.speech.set_luna_config(self.settings.get("luna_config", ""))
         self.speech.set_rate(self.settings["rate"])
         self.speech.set_volume(self.settings["volume"])
-        self.cues = CuePlayer()
+        self.cues = CuePlayer(on_error=lambda e: self.events.put(("cue_error", e)))
         self.overlay = None
         self.scan_frame = None
         self.overlay_error = ""
@@ -259,7 +259,7 @@ class ReaderApp:
         self.local_key_button.pack(side="left", padx=(10, 0))
         self.mode_voice_var = tk.BooleanVar(value=self.settings["mode_voice_hint"])
         self.mode_voice_check = ttk.Checkbutton(
-            modes, text="切换时语音提示：鼠标模式／默认模式",
+            modes, text="切换模式语音提示",
             variable=self.mode_voice_var, command=self.save_visual_settings)
         self.mode_voice_check.pack(anchor="w")
 
@@ -275,7 +275,7 @@ class ReaderApp:
         self.pick_region_button.pack(side="left")
         self.show_frame_var = tk.BooleanVar(value=self.settings["show_scan_frame"])
         self.show_frame_check = ttk.Checkbutton(
-            selection, text="显示跟随鼠标的淡绿色边框（不会挡住鼠标点击）",
+            selection, text="显示绿色扫描框",
             variable=self.show_frame_var, command=self.save_visual_settings)
         self.show_frame_check.pack(anchor="w")
         self.region_info_var = tk.StringVar(
@@ -308,7 +308,6 @@ class ReaderApp:
         self.similarity_spin.pack(side="left")
         self.similarity_spin.bind("<FocusOut>", self.save_similarity)
         self.similarity_spin.bind("<Return>", self.save_similarity)
-        note(timing, "短物品名只过滤完全相同的文字；长段落可容忍少量识别抖动。")
         action_row = ttk.Frame(mouse)
         action_row.pack(fill="x", pady=(3, 0))
         self.reset_mouse_button = ttk.Button(
@@ -343,7 +342,6 @@ class ReaderApp:
         self.import_luna_button = ttk.Button(
             voice_frame, text="选择本机原版语音配置", command=self.import_luna_config)
         self.import_luna_button.pack(anchor="w", pady=7)
-        note(voice_frame, "原始 config.json 只在你的电脑上使用，不会上传。")
 
         voice_controls = section(voice, "语速与音量")
         rate_row = row(voice_controls)
@@ -373,7 +371,6 @@ class ReaderApp:
 
         fullscreen = self._pages["fullscreen"]
         full_frame = section(fullscreen, "原版 V1.2 Small OCR")
-        note(full_frame, "保留原版全屏截图识别与文字框指向朗读；没有增加第二种模型。")
         full_hotkey = row(full_frame)
         card_label(full_hotkey, "全屏 OCR 快捷键").pack(side="left")
         self.key_button = ttk.Button(
@@ -390,16 +387,18 @@ class ReaderApp:
             clear_row, text=self.settings["clear_hotkey_label"], width=16,
             command=lambda: self.begin_hotkey("clear_vk"))
         self.clear_key_button.pack(side="left", padx=(18, 0))
+        cue_row = row(full_frame, 4)
         self.success_cue_var = tk.BooleanVar(value=self.settings["success_cue"])
         self.success_cue_check = ttk.Checkbutton(
-            full_frame, text="识别到文字且可朗读时播放清脆叮声",
+            cue_row, text="识别成功提示音",
             variable=self.success_cue_var, command=self.save_visual_settings)
-        self.success_cue_check.pack(anchor="w", pady=(6, 0))
-        note(full_frame, "默认模式结果保留 60 秒；清除键可以更换为其他不冲突的单键。")
+        self.success_cue_check.pack(side="left")
+        self.test_cue_button = ttk.Button(
+            cue_row, text="试听叮声", command=self.test_cue)
+        self.test_cue_button.pack(side="left", padx=(20, 0))
 
         filtering = self._pages["filters"]
         filter_frame = section(filtering, "朗读内容过滤")
-        note(filter_frame, "先 OCR，再按选项过滤，最后去重并朗读；原始 OCR 结果不会删除。")
         self.filter_english_var = tk.BooleanVar(value=self.settings["filter_english"])
         self.filter_numbers_var = tk.BooleanVar(value=self.settings["filter_numbers"])
         self.filter_symbols_var = tk.BooleanVar(value=self.settings["filter_symbols"])
@@ -415,7 +414,6 @@ class ReaderApp:
             filter_frame, text="过滤符号（例如 +、% 、★）",
             variable=self.filter_symbols_var, command=self.save_visual_settings)
         self.filter_symbols_check.pack(anchor="w", pady=8)
-        note(filter_frame, "关闭某项过滤后即可恢复对应文字的朗读；游戏关键数值可按需开启。")
 
         general = self._pages["general"]
         tools = section(general, "常用工具")
@@ -427,14 +425,10 @@ class ReaderApp:
                        side="left", padx=12)
         ttk.Button(tools_row, text="复制失败诊断",
                    command=self.copy_error).pack(side="left")
-        note(tools, "四个快捷键都可设置键盘单键或鼠标侧键 1/2，自动防止重复占用。")
-        note(tools, "不会存储游戏截图、OCR 文字或微软自然语音许可内容。")
 
         about = self._pages["about"]
         details = section(about, "Blue Star OCR")
-        note(details, "Windows 11 · V1.2 Small OCR 引擎 · 游戏文字朗读实验版")
-        note(details, "使用系统安装的中文语音；自然语音调用本机原作者兼容组件。")
-        note(details, "界面采用原生 ttk 控件，为 Windows 无障碍读屏及键盘操作保留控件语义。")
+        note(details, "Windows 11 · V1.2.1 · PP-OCRv6 Small")
 
         footer = ttk.Frame(self.root, padding=(22, 10, 22, 14))
         footer.pack(side="bottom", fill="x")
@@ -551,7 +545,8 @@ class ReaderApp:
                 (self.local_key_button, "立即识别鼠标附近文字的快捷键"),
                 (self.pick_key_button, "全局从鼠标位置开始自由拖框的快捷键"),
                 (self.clear_key_button, "手动立即清空识别结果的快捷键"),
-                (self.success_cue_check, "识别有效文字后播放清脆叮声，开关"),
+                (self.success_cue_check, "识别成功提示音开关"),
+                (self.test_cue_button, "试听识别成功的金属叮声，不启动 OCR"),
                 (self.period_entry, "鼠标局部 OCR 周期，单位毫秒"),
                 (self.period_save_button, "保存局部 OCR 周期"),
                 (self.similarity_check, "启用重复文本相似度过滤"),
@@ -928,6 +923,11 @@ class ReaderApp:
     def test_voice(self):
         self.speak_selected("你好，这是电脑游戏文字助手的本地语音试听。")
 
+    def test_cue(self):
+        """Playback test works independently of the success-cue enable switch."""
+        self.cues.play("complete")
+        self.status("正在试听提示音；如果无声，请检查 Windows 音量混合器。")
+
     def copy_voice_report(self):
         report = (self.voice_report + "\n语音速度诊断：" + self.last_voice_timing +
                   "\nUI Automation: " + self.accessibility_status)
@@ -1051,7 +1051,8 @@ class ReaderApp:
                 self.status("局部 OCR 没有可朗读文字；可在内容过滤中调整。")
             return
         if not repeated or manual:
-            self.speech.stop()
+            # The selected TTS engine already replaces its previous utterance.
+            # Avoid adding a redundant stop ahead of each fresh mouse text.
             self.update_output(raw)  # Accessible raw OCR stays untouched.
             self._hover_last_text = normalized
             self._hover_spoken_cursor = capture_cursor
@@ -1082,6 +1083,8 @@ class ReaderApp:
         self._hover_spoken_foreground = None
         self.hover.reset()
         self.speech.stop()
+        # A clear action must also discard ephemeral spoken-text audio cache.
+        getattr(self.speech, "clear_cache", lambda: None)()
         if self.overlay is not None:
             self.overlay.hide()
         self.update_output("")
@@ -1159,14 +1162,16 @@ class ReaderApp:
                                 "60 秒后自动清空。")
                     speakable = filter_speech_text(
                         "\n".join(region.text for region in self.lines), self.settings)
-                    if (speakable and self.mouse_mode == "pointer"
+                    if (self.mouse_mode == "pointer"
                             and self.settings.get("success_cue", True)):
-                        self.cues.play("complete")
+                        if speakable:
+                            self.cues.play("complete")
+                        elif self.lines:
+                            self.status("识别到文字，但被内容过滤全部排除；未播放成功提示音。")
                     if source == "selection" and self.mouse_mode == "hover":
                         spoken = filter_speech_text(
                             "\n".join(line.text for line in self.lines), self.settings)
                         if spoken:
-                            self.speech.stop()
                             self.speak_selected(spoken[:1900])
                 elif kind == "ocr_fail":
                     _, capture_id, detail = event
@@ -1229,6 +1234,8 @@ class ReaderApp:
                     self.status("语音速度诊断：" + event[1])
                 elif kind == "tts_error":
                     self.status("TTS 出错：" + event[1])
+                elif kind == "cue_error":
+                    self.status("提示音播放异常：" + event[1])
                 elif kind == "ui_error":
                     self.status("无障碍接口初始化异常：" + event[1])
         except Empty:
@@ -1314,15 +1321,16 @@ class ReaderApp:
                     if target != self.last_target:
                         if self.overlay is not None:
                             self.overlay.show(target)
-                        if self.last_target is not None:
-                            self.speech.stop()
+                        if self.last_target is not None and target is None:
+                            self.speech.stop()  # Leaving text stops playback.
                         self.last_target = target
                     to_read = self.hover.update(target, time.monotonic() * 1000)
                     if to_read is not None:
                         spoken = filter_speech_text(to_read.text, self.settings)
                         if spoken:
-                            self.cues.play("hover")
                             self.speak_selected(spoken)
+                        else:
+                            self.speech.stop()  # New region was filtered empty.
             elif self.mouse_mode == "hover":
                 self.update_scan_frame()
                 if self._hover_spoken_cursor is not None:
