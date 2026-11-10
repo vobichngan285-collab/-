@@ -255,3 +255,15 @@
 - **真实 CI 状态**：最后 GitHub Actions run **`42674922910` completed/success**；**78 passed, 1 skipped, 1 warning**（skip 是 hosted source Python 的 Tcl 运行时，冻结 EXE 真正运行 3 次 F11 Tk picker 测试 PASS）；Windows 实测 frozen EXE 通过 V1.2 Small OCR、SAPI/WinRT 模块、云希/晓晓worker无密钥协议与中文路径/复用、点击穿透框自检、全应用 GUI 启动与 UIA (35命名原生控件 + 六页)、ZIP 文件生成及上传。早期 run `42673587752` 的测试脚本自身误判文档中的 Canvas 用词，随后修复；run `42674652065` 因新增诊断日志行的 Python 转义符错误在 compileall 被挡住，已修复；另几次 run 0 jobs 的调度失败不代表通过。只有最后绿色完整 run 为验收结果。
 - **下载地址**：GitHub Actions Artifact **`13698963874`**，名称 `GameTextReader-V12-CleanBlue-AccessibleFilterOCR-Experimental`，大小 **129,812,722 bytes**，临时保留至 `2026-12-09T18:34:10Z`，公开可验证链接 https://github.com/vobichngan285-collab/-/actions/runs/42674922910/artifacts/13698963874 。Windows x64 便携双层 ZIP，用户要逐层解压，在单独目录启动 `GameTextReader.exe`，不覆盖旧版本。软件截图和语音许可不上传。
 - **尚未完成的实机部分**：用户 Windows11 实际游戏《七日杀》中鼠标跟随绿色框的穿透和坐标、短名称“碎布”、朗读节奏、三类过滤是否符合个人偏好、真实云希/晓晓实际声音，以及用户使用的**真实无障碍读屏器是否逐个读出新 UI 控件**都需用户亲机测试。**不能将 Windows UI Automation 的 provider 通过宣传为实际辅助读屏器实测已过**。如果用户在读屏器里遇到不朗读，下一轮优先修复该问题，不改变旧成功的 V1.2 OCR 和语音链。
+
+
+## 最新接手提示：2026-11-11 Windows 游戏 OCR “简单粗暴”可见像素截图实验版
+
+**唯一优先仍是电脑 GameTextReader；安卓蓝星向导暂停。** 用户指出真实《七日杀》主菜单可读，但进入存档菜单后最新绑定游戏 HWND/GDI 版叮声响却不读；用户纠正此前“解压失败”误解（实际解压启动没问题，是 OCR 逻辑没修好），并批准把核心链路简化、优化全屏识别→叮声→鼠标朗读的等待。
+
+- Windows 项目原仓库 `vobichngan285-collab/-`，main 应用代码未覆盖。新独立分支 `fix/windows-simple-visible-capture-fast-20261111`，构建源码 Commit `0954e8157e851587acd5130b472dbe2ef6d2ad71`。
+- **实际修改：** F8 使用锁定游戏 HWND 仅查询游戏客户端当下位置，截取当前位置可见桌面像素（原 V1.2 ImageGrab 路线）；不再经过窗口 GDI 位图。局部/固定区域仍统一真实桌面像素。保留 V1.2 Small、自然语音、滚轮、绿色框、无障碍、多模式，严禁下次随意重写。鼠标/队列轮询调至15ms，有可朗读结果则在 GUI 更新前投递叮声。不得宣传已有游戏真实速度提升数据。
+- **CI:** 第一次 [42854631681](https://github.com/vobichngan285-collab/-/actions/runs/42854631681) 因旧20ms测试断言失败，后修复测试；最终 [42854889143](https://github.com/vobichngan285-collab/-/actions/runs/42854889143) Windows **success /125 passed /1 warning**，冻结 EXE OCR/语音协议/UIA/Tk picker自测成功，ZIP内1186项解压读校验成功。
+- **交付直链：** https://github.com/vobichngan285-collab/-/releases/download/win-simple-visible-capture-20261111/BlueStarOCR_SimpleVisibleCapture_Fast_Windows_x64.zip ，130292246 bytes，SHA256 `f3aa38af7db2a97120612316fbb574af768c8d1441f181868cee5e3e20a5d88c`；[Release 和源码](https://github.com/vobichngan285-collab/-/releases/tag/win-simple-visible-capture-20261111) 。此前用户真实能发声的旧版和所有 ZIP/源码均保留。私人 `config..json` 不上云不随包。
+- **待用户 Windows 真机验证，不能称已解决：** 《七日杀》第一主菜单 F8→叮→鼠标逐行读；点击开始进入「玩家档案/继续游戏/管理存档」新画面后再 F8→叮→逐行读；不同模式/轮盘清除可用；微软自然语音有声；具体屏幕内 F8 耗时。若依旧有叮但读旧文字，优先从新状态文字中的 `desktop_game_client`、实际识别行数、光标命中来定位，不再反复打包或胡乱改 OCR/TTS。**可见桌面抓图可能受独占全屏/遮挡影响**，不能假称已真机证实所有游戏场景。
+- 详细原始历史和完整发布记录见 `main/RELEASE_STATUS.md` 最新追加章节；原 main 根目录的历史记录全部保留。
