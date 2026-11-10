@@ -37,7 +37,7 @@ from .foreground import foreground_class, foreground_window_id
 from .hover_target import centered_region
 from .fixed_region import (parse_fixed_region, parse_monitor, region_on_same_monitor,
                            screenshot_fingerprint, frame_has_changed,
-                           parse_strategy, display_color, parse_thickness)
+                           parse_strategy, display_color, parse_thickness, fresh_speech_lines)
 from .text_filters import (DEFAULT_FILTER_SETTINGS, filter_speech_text,
                            is_repeat_speech, similarity_threshold)
 
@@ -1217,6 +1217,130 @@ class ReaderApp:
             self.settings["volume"] = value
             self.speech.set_volume(value)
             self.persist()
+
+    def _fixed_region_box(self):
+        """Saved region is valid only on exactly its original physical monitor."""
+        monitor = parse_monitor(self.settings.get("fixed_monitor"))
+        box = parse_fixed_region(self.settings.get("fixed_region"), monitor)
+        if monitor is None or box is None:
+            return None
+        try:
+            cx, cy = (box[0] + box[2]) // 2, (box[1] + box[3]) // 2
+            live = monitor_rect_at_point(cx, cy)
+        except Exception:
+            return None
+        return box if region_on_same_monitor(box, monitor, live) else None
+
+    def start_region_scan(self, force: bool = False, snapshot=None):
+        """One fixed-position screenshot, optional cheap change gate, then Small.
+
+        Never run overlapping OCR instances and never impose a delay on F8/F11.
+        A completed old-mode worker can finish but cannot deliver stale speech.
+        """
+        if (self.closed or self._choosing_region or self.mouse_mode != "region"
+                or self.setting_hotkey or self.busy or self.region_ocr_busy
+                or self.hover_ocr_busy or self.pending_full_capture):
+            return False
+        if self.root.state() == "normal":
+            return False
+        box = self._fixed_region_box()
+        if box is None:
+            self._region_next_due = time.monotonic() + 1.0
+            if not self._region_invalid_reported:
+                self.status("固定区域的显示器或分辨率已变化，请按 F11 重新框选。")
+                self._region_invalid_reported = True
+            if self.fixed_frame is not None:
+                self.fixed_frame.hide()
+            return False
+        self._region_invalid_reported = False
+        monitor = parse_monitor(self.settings["fixed_monitor"])
+        strategy = parse_strategy(self.settings["region_strategy"])
+        period = (self.settings["region_period_ms"] if strategy == "period"
+                  else 300)
+        self._region_next_due = time.monotonic() + period / 1000.0
+        old_signature = self._region_last_fingerprint
+        generation = self.mode_generation
+        self._region_job_id += 1
+        job = self._region_job_id
+        self.region_ocr_busy = True
+        start_focus = foreground_window_id()
+
+        def work():
+            started = time.monotonic()
+            try:
+                if snapshot is not None:
+                    ml, mt = monitor[:2]
+                    image = snapshot.crop((box[0] - ml, box[1] - mt,
+                                           box[2] - ml, box[3] - mt))
+                else:
+                    image = ImageGrab.grab(bbox=box, all_screens=True)
+                if image.size != (box[2] - box[0], box[3] - box[1]):
+                    raise RuntimeError("固定区域截图尺寸不匹配")
+                sig = screenshot_fingerprint(image)
+                capture_ms = round((time.monotonic() - started) * 1000)
+                if strategy == "change" and not force and not frame_has_changed(old_signature, sig):
+                    # No OCR necessary, but update the small grayscale baseline.
+                    self.events.put(("region_ok", generation, job, None, sig,
+                                     capture_ms, start_focus, (capture_ms, 0), force))
+                    return
+                with self._ocr_lock:
+                    lines = self.ocr_worker.recognize(image, box[:2], "small")
+                infer_ms = round((time.monotonic() - started) * 1000) - capture_ms
+                self.events.put(("region_ok", generation, job, lines, sig,
+                                 round((time.monotonic() - started) * 1000),
+                                 start_focus, (capture_ms, infer_ms), force))
+            except Exception:
+                self.events.put(("region_fail", generation, job,
+                                 traceback.format_exc()))
+        threading.Thread(target=work, daemon=True,
+                         name="FixedRegionSmallOCR").start()
+        return True
+
+    def _handle_region_result(self, generation, job, lines, fingerprint,
+                              elapsed, focus, timings, force=False):
+        # Job ID prevents an older mode's completion clearing a newer busy flag.
+        if job != self._region_job_id:
+            return
+        self.region_ocr_busy = False
+        self._region_next_due = max(self._region_next_due, time.monotonic() + 0.06)
+        if self.pending_full_capture:
+            self.pending_full_capture = False
+            self.capture()
+            return
+        if generation != self.mode_generation or self.mouse_mode != "region":
+            return
+        if self._fixed_region_box() is None:
+            return
+        if not force and focus != foreground_window_id():
+            # Never speak a stale scan captured across a window switch.
+            self._region_last_fingerprint = None
+            return
+        self._region_last_fingerprint = fingerprint
+        if lines is None:
+            return  # Same pixels: avoid model inference and speech.
+        regions = build_reading_regions(lines)
+        raw = "\n".join(r.text for r in regions).strip()
+        speech_text = filter_speech_text(raw, self.settings)
+        current_lines = [line for line in speech_text.splitlines() if line.strip()]
+        normalized = normalized_text(speech_text)
+        previous_text = self._region_last_text
+        previous_lines = list(self._region_prev_lines)
+        self._region_prev_lines = current_lines
+        self._region_last_text = normalized
+        if not normalized:
+            if previous_text:
+                self.speech.stop()
+            self.update_output(raw)
+            return
+        if is_repeat_speech(previous_text, normalized, self.settings):
+            return
+        additions = fresh_speech_lines(previous_lines, current_lines)
+        self.update_output(raw)
+        if not additions:
+            return
+        self.speak_selected("\n".join(additions)[:1900])
+        self.status(f"区域跟踪：检测到新文字，截图 {timings[0]} 毫秒，"
+                    f"OCR {timings[1]} 毫秒。")
 
     def start_hover_ocr(self, manual: bool = False):
         """One mouse-relative screenshot; do not queue overlapping OCR jobs."""
