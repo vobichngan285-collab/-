@@ -12,9 +12,9 @@ VK_XBUTTON1 = 0x05
 VK_XBUTTON2 = 0x06
 MOUSE_SIDE_VKS = (VK_XBUTTON1, VK_XBUTTON2)
 MODIFIER_VKS = (0x10, 0x11, 0x12, 0x5B, 0x5C)
-HOTKEY_FIELDS = ("vk", "mode_vk", "local_vk", "pick_vk", "clear_vk")
-HOTKEY_LABELS = ("hotkey_label", "mode_hotkey_label", "local_hotkey_label", "pick_hotkey_label", "clear_hotkey_label")
-HOTKEY_DEFAULTS = (0x77, 0x78, 0x79, 0x7A, 0x75)  # F8 / F9 / F10 / F11 / F6
+HOTKEY_FIELDS = ("vk", "mode_vk", "local_vk", "pick_vk", "clear_vk", "frame_vk")
+HOTKEY_LABELS = ("hotkey_label", "mode_hotkey_label", "local_hotkey_label", "pick_hotkey_label", "clear_hotkey_label", "frame_hotkey_label")
+HOTKEY_DEFAULTS = (0x77, 0x78, 0x79, 0x7A, 0x75, 0x76)  # F8 / F9 / F10 / F11 / F6 / F7
 DEFAULT_REGION = (-300, -140, 600, 400)
 MIN_PERIOD_MS = 100
 MAX_PERIOD_MS = 60000
@@ -63,8 +63,8 @@ def sanitize_hotkeys(config: dict) -> dict:
         label = config.get(label_field)
         if (repaired or vk in MOUSE_SIDE_VKS or
                 not isinstance(label, str) or not label or
-                (label in ("F8", "F9", "F10", "F11", "F6") and
-                 vk != {"F8": 0x77, "F9": 0x78, "F10": 0x79, "F11": 0x7A, "F6": 0x75}[label])):
+                (label in ("F8", "F9", "F10", "F11", "F6", "F7") and
+                 vk != {"F8": 0x77, "F9": 0x78, "F10": 0x79, "F11": 0x7A, "F6": 0x75, "F7": 0x76}[label])):
             config[label_field] = hotkey_label(vk)
         reserved.add(vk)
     return config
@@ -135,7 +135,8 @@ def capture_box(region: RelativeRegion, cursor: tuple[int, int],
 
 
 def next_mouse_mode(current: str) -> str:
-    return "hover" if current == "pointer" else "pointer"
+    """Existing mode hotkey: pointer -> cursor-follow -> fixed-region -> pointer."""
+    return {"pointer": "hover", "hover": "region", "region": "pointer"}.get(current, "pointer")
 
 
 def normalized_text(text: str) -> str:
