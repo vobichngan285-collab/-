@@ -196,7 +196,7 @@ def test_global_key_poll_handles_side_hotkeys_once_per_press(monkeypatch):
     app.busy = False
     app._hover_next_due = float("inf")
     hits = []
-    app.capture = lambda: hits.append("fullscreen")
+    app.capture = lambda trigger_at=None: hits.append("fullscreen")
     app.toggle_mouse_mode = lambda: hits.append("mode")
     app.start_hover_ocr = lambda manual: hits.append("local")
     app.status = lambda msg: hits.append("error")
