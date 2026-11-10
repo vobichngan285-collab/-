@@ -374,3 +374,14 @@
 - **功能**：默认模式识别成功且有可朗读内容播放短促叮声（可关闭）；F11 光标起点四方向拖动松开立即 OCR，绿色框跟随保存 X/Y 偏移；新增可自定义 F6 立即清除 OCR 与朗读、取消过期结果，原 60 秒自动清空保留。修复 `spoken` 未初始化、延迟调度及旧语音队列，局部截图减少重复颜色转换、OCR 串行锁、截图与推理分段耗时记录。
 - **验证**：GitHub Actions [42684557197](https://github.com/vobichngan285-collab/-/actions/runs/42684557197) `completed/success`；87 passed / 1 warning，冻结 Windows EXE Small OCR、UI Automation 37 个原生命名控件、F11 Tk 重复拖框、常驻自然语音 worker 协议、原版 Luna 哈希与 GPL 源码等检查均成功。
 - **交付**：GitHub Actions [artifact 13704431105](https://github.com/vobichngan285-collab/-/actions/runs/42684557197/artifacts/13704431105) (129817505 bytes, 至 2026-12-09T19:36:02Z)，便携 ZIP，**不含私人语音配置**。下一步 Windows11 游戏场景、自然语音真实出声/提速、真实读屏器真机验收，不保证任何未经测试的速度改善百分比。
+
+## 2026-11-10 · 固定区域跟踪第三模式实验版
+
+- 原仓库 `vobichngan285-collab/-`；开发分支 `exp/windows-fixed-region-tracking-20261110`，构建源码 `a93e31e4b034df6e514bd5b314c05ee702378c16`，基线 V1.2.1 `997ade1552d097917b8a3121b963c4b45d6844fb`。
+- F9 循环默认/鼠标跟随/固定区域跟踪；区域跟踪 F11 暗屏自由框选、松手启动；保存绝对屏幕区域与显示器几何，切回自动恢复。区域两种策略：画面变化才 OCR（约300ms 低成本差分）／自定义100至60000ms周期 OCR。
+- 固定区域只朗读新行，相同文字不重复；文字消失后再出现可重读。OCR 模型全局锁、模式 generation 和任务 job_id 防旧结果串模式；F6 清空保留当前固定区域去重状态，防下轮把相同文字重新朗读。
+- 边框统一五色、1～8像素，可默认显示；F7 自定义快捷键即时显示/隐藏固定框、完全不触发识别或 TTS；边框保持 Win32 原生点击穿透且在 OCR 采样边界外。
+- 用户要求的逐项逻辑审核：修复旧冻结 F11 自测缺少状态字段导致的显示失败，解决新 F7 单控件测试夹具访问无关控件的问题；旧 F8/F11、语音、模型、不改用户私人配置。未合并 main 应用代码、未覆盖旧包。
+- **最终 Windows Actions** [42762512266](https://github.com/vobichngan285-collab/-/actions/runs/42762512266) 已完成成功，**109 测试通过，1 warning，0 失败**，真实冻结 EXE/Small OCR/未修改原版 Luna/持续语音IPC/UIA 49命名原生控件/F11 三次 Tk picker/五色8px native outline 通过。
+- **便携安装实验包** [artifact 13737813672](https://github.com/vobichngan285-collab/-/actions/runs/42762512266/artifacts/13737813672) 129838758 bytes，有效期 2026-12-10T05:31:57Z，内层 `GameTextReader_FixedRegion_ThreeModes_Experimental_Windows_x64.zip`，不含私有 `config..json`。下载后解压新目录运行 GameTextReader.exe，非 MSI，不覆盖旧版。
+- 用户电脑 Windows 11 / 《七日杀》真实 OCR变化检测、持续 CPU 开销和游戏 FPS、显示器边缘、音频输出仍待确认，不冒称已经真机验收。
