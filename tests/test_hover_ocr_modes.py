@@ -216,7 +216,7 @@ def test_global_key_poll_handles_side_hotkeys_once_per_press(monkeypatch):
     buttons[119] = True
     app.poll_input()
     assert hits == ["mode", "local", "fullscreen"]
-    assert app.root.waits == [20] * 6
+    assert app.root.waits == [15] * 6  # Reduced pointer poll latency, no debounce delay
 
 
 def test_real_tk_picker_opens_selects_and_cancels_on_windows():
