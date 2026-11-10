@@ -1525,21 +1525,25 @@ class ReaderApp:
         else:
             self.invalidate("已手动清空识别结果和朗读；可重新截图.")
 
-    def capture_from_button(self):
+    def capture_from_button(self, trigger_at=None):
         self.root.iconify()
-        self.root.after(250, self.capture)
+        # UI-hide path only: gameplay F8 starts capture immediately.
+        self.root.after(120, lambda: self.capture(trigger_at))
 
-    def capture(self):
+    def capture(self, trigger_at=None):
         if self.hover_ocr_busy or self.region_ocr_busy:
             # A manual full-screen hotkey takes precedence over periodic OCR.
             # Keep at most one pending full capture and never share an active
             # RapidOCR instance across simultaneous worker threads.
             self.pending_full_capture = True
+            self._pending_full_trigger_at = trigger_at or time.monotonic()
             self.status("局部 OCR 正在结束；随后执行全屏截图（不排队）。")
             return
         if self.busy:
             return
         self.pending_full_capture = False
+        request_started = trigger_at or getattr(self, "_pending_full_trigger_at", None) or time.monotonic()
+        self._pending_full_trigger_at = None
         self.invalidate("正在识别新画面...")
         capture_id = self.capture_id
         self.busy = True
@@ -1552,14 +1556,21 @@ class ReaderApp:
             try:
                 focus = foreground_window_id()
                 image, origin = grab_current_monitor()
-                capture_ms = round((time.monotonic() - started) * 1000)
+                captured_at = time.monotonic()
+                capture_ms = round((captured_at - started) * 1000)
                 phase = f"离线OCR推理（{tier}）"
+                waiting_at = time.monotonic()
                 with self._ocr_lock:
+                    lock_ms = round((time.monotonic() - waiting_at) * 1000)
                     lines = self.ocr_worker.recognize(image, origin, tier)
-                infer_ms = round((time.monotonic() - started) * 1000) - capture_ms
+                    preprocess_ms = getattr(self.ocr_worker, "last_preprocess_ms", 0)
+                    engine_ms = getattr(self.ocr_worker, "last_engine_ms", 0)
+                infer_ms = round((time.monotonic() - captured_at) * 1000)
                 self.events.put(("ocr_ok", capture_id, lines,
                                  round((time.monotonic() - started) * 1000),
-                                 focus, "fullscreen", (capture_ms, infer_ms)))
+                                 focus, "fullscreen", (capture_ms, infer_ms,
+                                 lock_ms, preprocess_ms, engine_ms,
+                                 request_started)))
             except Exception as exc:
                 self.events.put(("ocr_fail", capture_id,
                                  "phase: " + phase + "\n" +
@@ -1593,6 +1604,14 @@ class ReaderApp:
                                 "60 秒后自动清空。")
                     speakable = filter_speech_text(
                         "\n".join(region.text for region in self.lines), self.settings)
+                    if source == "fullscreen" and timings and len(timings) >= 6:
+                        # Monotonic key-to-cue request, not audio device latency.
+                        self.last_full_timing = (
+                            f"按键到完成 {round((time.monotonic()-timings[5])*1000)}ms；"
+                            f"截图 {timings[0]}ms，锁等待 {timings[2]}ms，"
+                            f"预处理 {timings[3]}ms，模型 {timings[4]}ms；"
+                            f"结果整理完成，等待提示音请求。")
+                        self.status(self.last_full_timing)
                     if (self.mouse_mode == "pointer"
                             and self.settings.get("success_cue", True)):
                         if speakable:
@@ -1841,6 +1860,8 @@ class ReaderApp:
                 self._region_picker.cancel()
             except tk.TclError:
                 pass
+        if getattr(self, "wheel_listener", None) is not None:
+            self.wheel_listener.close()
         self.speech.shutdown()
         self.cues.shutdown()
         if getattr(self, "scan_frame", None) is not None:
