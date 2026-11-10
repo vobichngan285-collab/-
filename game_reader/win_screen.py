@@ -70,9 +70,10 @@ def monitor_rect_at_cursor() -> tuple[int, int, int, int]:
     return monitor_rect_at_point(*get_cursor())
 
 
-def grab_current_monitor() -> tuple[Image.Image, tuple[int, int]]:
+def grab_current_monitor(bound_hwnd=None, report=None) -> tuple[Image.Image, tuple[int, int]]:
     left, top, right, bottom = monitor_rect_at_cursor()
-    img = capture_rect((left, top, right, bottom), foreground_capture_hwnd())
+    target = foreground_capture_hwnd() if bound_hwnd is None else int(bound_hwnd)
+    img = capture_rect((left, top, right, bottom), target, report=report)
     expected_size = (right - left, bottom - top)
     if img.size != expected_size:
         raise RuntimeError(f"Capture size mismatch: {img.size} vs {expected_size}")
@@ -96,6 +97,7 @@ def foreground_capture_hwnd() -> int:
         return 0
 
 
-def grab_game_rect(box):
-    """Luna-derived HWND-first GDI capture with original desktop fallback."""
-    return capture_rect(box, foreground_capture_hwnd())
+def grab_game_rect(box, bound_hwnd=None, report=None):
+    """Use the SAME pinned game HWND for each fresh screenshot."""
+    target = foreground_capture_hwnd() if bound_hwnd is None else int(bound_hwnd)
+    return capture_rect(box, target, report=report)
