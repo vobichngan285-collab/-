@@ -21,7 +21,7 @@ from PIL import ImageGrab
 from .core import HoverTracker, OCRLine, hit_test, build_reading_regions
 from .ocr_backend import LocalOCR
 from .win_screen import (enable_dpi_awareness, get_cursor, is_key_down,
-                         grab_current_monitor, monitor_rect_at_cursor)
+                         grab_current_monitor, monitor_rect_at_cursor, monitor_rect_at_point)
 from .speech import SpeechWorker, enumerate_sapi_voices
 from .voice_info import preferred_voice_index, narrator_package_names, voice_diagnostic
 from .ms_voice_discovery import (discover_natural_voices, load_user_config,
@@ -35,6 +35,9 @@ from .hover_modes import (MOUSE_SIDE_VKS, DEFAULT_REGION, RelativeRegion,
 from .region_picker import ScreenRegionPicker
 from .foreground import foreground_class, foreground_window_id
 from .hover_target import centered_region
+from .fixed_region import (parse_fixed_region, parse_monitor, region_on_same_monitor,
+                           screenshot_fingerprint, frame_has_changed,
+                           parse_strategy, display_color, parse_thickness)
 from .text_filters import (DEFAULT_FILTER_SETTINGS, filter_speech_text,
                            is_repeat_speech, similarity_threshold)
 
@@ -46,7 +49,11 @@ DEFAULTS = {"vk": 0x77, "hotkey_label": "F8",
             "local_vk": 0x79, "local_hotkey_label": "F10",
             "pick_vk": 0x7A, "pick_hotkey_label": "F11",
             "clear_vk": 0x75, "clear_hotkey_label": "F6",
+            "frame_vk": 0x76, "frame_hotkey_label": "F7",
             "period_ms": 500, "region": list(DEFAULT_REGION),
+            "fixed_region": None, "fixed_monitor": None,
+            "region_strategy": "change", "region_period_ms": 500,
+            "frame_color": "#42DD9C", "frame_thickness": 3,
             "success_cue": True,
             "tier": "small", "voice": "", "rate": 0,
             "volume": 100, "dwell_ms": 0, "luna_config": "",
@@ -69,6 +76,17 @@ def read_settings() -> dict:
     except ValueError:
         settings["period_ms"] = 500
     settings["region"] = RelativeRegion.from_settings(settings["region"]).as_list()
+    monitor = parse_monitor(settings["fixed_monitor"])
+    fixed = parse_fixed_region(settings["fixed_region"], monitor) if monitor else None
+    settings["fixed_monitor"] = list(monitor) if fixed else None
+    settings["fixed_region"] = list(fixed) if fixed else None
+    settings["region_strategy"] = parse_strategy(settings["region_strategy"])
+    try:
+        settings["region_period_ms"] = parse_period_ms(settings["region_period_ms"])
+    except ValueError:
+        settings["region_period_ms"] = 500
+    settings["frame_color"] = display_color(settings["frame_color"])
+    settings["frame_thickness"] = parse_thickness(settings["frame_thickness"])
     settings["tier"] = "small"
     settings["dwell_ms"] = 0
     try:
@@ -121,6 +139,14 @@ class ReaderApp:
         self._side_previous = {vk: is_key_down(vk) for vk in MOUSE_SIDE_VKS}
         self.mouse_mode = "pointer"
         self.mode_generation = 0
+        self.region_ocr_busy = False
+        self._region_job_id = 0
+        self._region_next_due = float("inf")
+        self._region_last_fingerprint = None
+        self._region_last_text = ""
+        self._region_last_window = None
+        self._region_border_visible = True
+        self._region_force_initial = False
         self.hover_ocr_busy = False
         self._hover_last_text = ""
         self._mode_announcement_until = 0.0
@@ -146,16 +172,10 @@ class ReaderApp:
         self.cues = CuePlayer(on_error=lambda e: self.events.put(("cue_error", e)))
         self.overlay = None
         self.scan_frame = None
+        self.fixed_frame = None
+        self._frame_style = None
         self.overlay_error = ""
-        try:
-            from .overlay import ClickThroughOutline
-            self.overlay = ClickThroughOutline()
-            # Independently from the legacy V1.2 target outline, four
-            # 2px non-activating windows show the actual cursor crop edge.
-            self.scan_frame = ClickThroughOutline(
-                alpha=92, padding=3, thickness=2)
-        except Exception as ex:
-            self.overlay_error = f"{type(ex).__name__}: {ex}"
+        self._apply_frame_style()
 
         self.create_widgets()
         self.enable_accessibility()
@@ -200,6 +220,7 @@ class ReaderApp:
         self.nav_buttons = {}
         nav = (
             ("mouse", "OCR 与鼠标"),
+            ("region", "区域跟踪"),
             ("voice", "语音设置"),
             ("fullscreen", "全屏 OCR"),
             ("filters", "内容过滤"),
@@ -235,7 +256,7 @@ class ReaderApp:
         mouse = self._pages["mouse"]
         modes = section(mouse, "工作模式")
         self.mouse_mode_var = tk.StringVar(
-            value="当前：默认模式（按 F9 切换到鼠标模式）")
+            value="当前：默认模式（按 F9 循环切换三种模式）")
         choose = row(modes, 2)
         self.mouse_mode_button = ttk.Button(
             choose, text="鼠标模式", style="Accent.TButton",
@@ -243,7 +264,10 @@ class ReaderApp:
         self.mouse_mode_button.pack(side="left", fill="x", expand=True, padx=(0, 6))
         self.default_mode_button = ttk.Button(
             choose, text="默认模式", command=lambda: self.set_mouse_mode("pointer"))
-        self.default_mode_button.pack(side="left", fill="x", expand=True, padx=(6, 0))
+        self.default_mode_button.pack(side="left", fill="x", expand=True, padx=(6, 6))
+        self.region_mode_button = ttk.Button(
+            choose, text="区域跟踪", command=lambda: self.set_mouse_mode("region"))
+        self.region_mode_button.pack(side="left", fill="x", expand=True)
         ttk.Label(modes, textvariable=self.mouse_mode_var, style="CardMuted.TLabel").pack(
             anchor="w", pady=(0, 4))
         hotkeys = row(modes)
@@ -317,6 +341,65 @@ class ReaderApp:
             action_row, text="应用设置", style="Accent.TButton",
             command=self.apply_mouse_settings)
         self.apply_mouse_button.pack(side="right")
+
+        fixed_page = self._pages["region"]
+        region_choice = section(fixed_page, "固定区域")
+        region_toolbar = row(region_choice, 4)
+        self.region_pick_button = ttk.Button(
+            region_toolbar, text="F11 重新框选", command=self.select_region)
+        self.region_pick_button.pack(side="left")
+        self.region_preview_var = tk.StringVar(value=self.format_fixed_region())
+        ttk.Label(region_choice, textvariable=self.region_preview_var,
+                  style="Card.TLabel").pack(anchor="w", pady=(4, 2))
+        frame_row = row(region_choice, 4)
+        self.frame_key_button = ttk.Button(
+            frame_row, text=self.settings["frame_hotkey_label"], width=10,
+            command=lambda: self.begin_hotkey("frame_vk"))
+        self.frame_key_button.pack(side="left")
+        ttk.Label(frame_row, text="显示／隐藏区域框", style="Card.TLabel").pack(
+            side="left", padx=(12, 0))
+
+        strategy = section(fixed_page, "识别方式")
+        self.region_strategy_var = tk.StringVar(value=self.settings["region_strategy"])
+        ttk.Radiobutton(
+            strategy, text="画面变化时识别", value="change",
+            variable=self.region_strategy_var,
+            command=self.save_region_preferences).pack(anchor="w")
+        ttk.Radiobutton(
+            strategy, text="周期识别", value="period",
+            variable=self.region_strategy_var,
+            command=self.save_region_preferences).pack(anchor="w")
+        period_row = row(strategy, 3)
+        card_label(period_row, "周期（毫秒）").pack(side="left")
+        self.region_period_var = tk.StringVar(value=str(self.settings["region_period_ms"]))
+        self.region_period_entry = ttk.Entry(
+            period_row, width=10, textvariable=self.region_period_var)
+        self.region_period_entry.pack(side="left", padx=(10, 10))
+        self.region_period_button = ttk.Button(
+            period_row, text="保存", command=self.save_region_preferences)
+        self.region_period_button.pack(side="left")
+
+        border_settings = section(fixed_page, "边框")
+        self.frame_enabled_var = tk.BooleanVar(value=self.settings["show_scan_frame"])
+        self.frame_enabled_check = ttk.Checkbutton(
+            border_settings, text="默认显示边框",
+            variable=self.frame_enabled_var, command=self.save_frame_preferences)
+        self.frame_enabled_check.pack(anchor="w")
+        border_row = row(border_settings, 4)
+        card_label(border_row, "颜色").pack(side="left")
+        self.frame_color_var = tk.StringVar(value=self.color_display_name())
+        self.frame_color_select = ttk.Combobox(
+            border_row, width=9, state="readonly", textvariable=self.frame_color_var,
+            values=["绿色", "蓝色", "黄色", "红色", "白色"])
+        self.frame_color_select.pack(side="left", padx=(10, 16))
+        self.frame_color_select.bind("<<ComboboxSelected>>", self.save_frame_preferences)
+        card_label(border_row, "粗细").pack(side="left")
+        self.frame_thickness_var = tk.StringVar(value=str(self.settings["frame_thickness"]))
+        self.frame_thickness_spin = ttk.Spinbox(
+            border_row, from_=1, to=8, width=4, textvariable=self.frame_thickness_var)
+        self.frame_thickness_spin.pack(side="left", padx=(10, 0))
+        self.frame_thickness_spin.bind("<FocusOut>", self.save_frame_preferences)
+        self.frame_thickness_spin.bind("<Return>", self.save_frame_preferences)
 
         voice = self._pages["voice"]
         voice_frame = section(voice, "本地系统语音")
@@ -451,6 +534,7 @@ class ReaderApp:
             raise ValueError("未知设置页")
         titles = {
             "mouse": "OCR 与鼠标",
+            "region": "区域跟踪",
             "voice": "语音设置",
             "fullscreen": "全屏 OCR",
             "filters": "内容过滤",
