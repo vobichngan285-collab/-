@@ -409,6 +409,7 @@ def test_f11_opens_picker_globally_without_erasing_game_ocr_on_focus_change(monk
     app.lines = [OCRLine("旧桌面图标", 10, 10, 90, 40)]
     app._full_capture_window = 100
     app.last_target = None
+    from types import SimpleNamespace
     app.hover = SimpleNamespace(reset=lambda: None)
     app.overlay = None
     calls = []
