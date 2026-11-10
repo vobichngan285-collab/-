@@ -1,4 +1,4 @@
-"""Two short, original low-volume UI cues. No downloaded audio assets."""
+"""Original short UI cues, independently mixed with all TTS playback."""
 from __future__ import annotations
 
 import io
@@ -6,7 +6,9 @@ import math
 import random
 import threading
 import wave
-from queue import Empty, Queue
+from queue import Queue
+
+from .cue_audio_win import play_cue
 
 
 def make_click_wave(kind: str) -> bytes:
@@ -14,7 +16,7 @@ def make_click_wave(kind: str) -> bytes:
     if kind not in ("complete", "hover"):
         raise ValueError("Unknown cue kind")
     rate = 22050
-    duration = 0.145 if kind == "complete" else 0.038
+    duration = 0.195 if kind == "complete" else 0.038
     rng = random.Random(1337 if kind == "complete" else 681)
     frames = bytearray()
     for i in range(int(rate * duration)):
@@ -23,9 +25,10 @@ def make_click_wave(kind: str) -> bytes:
         metallic = (math.sin(2 * math.pi * (1240 if kind == "complete" else 980) * t)
                     + 0.35 * math.sin(2 * math.pi * 2790 * t))
         noise = (rng.random() * 2 - 1) * math.exp(-t * 110)
-        decay = math.exp(-t * (25 if kind == "complete" else 97))
-        amplitude = 0.17 if kind == "complete" else 0.065
-        signal = max(-1.0, min(1.0, amplitude * (metallic * decay + noise)))
+        decay = math.exp(-t * (17 if kind == "complete" else 97))
+        attack = 1.0 - math.exp(-t * 1200)
+        amplitude = 0.42 if kind == "complete" else 0.065
+        signal = max(-1.0, min(1.0, amplitude * attack * (metallic * decay + noise)))
         frames.extend(int(signal * 32767).to_bytes(2, "little", signed=True))
     stream = io.BytesIO()
     with wave.open(stream, "wb") as wav:
@@ -45,21 +48,23 @@ class CuePlayer:
         self._thread.start()
 
     def _run(self):
-        try:
-            import winsound
-        except ImportError:
-            return
         while True:
             kind = self._q.get()
             if kind is None:
                 return
             try:
-                winsound.PlaySound(self._audio[kind],
-                                   winsound.SND_MEMORY | winsound.SND_SYNC |
-                                   winsound.SND_NODEFAULT)
+                # Separate waveOut stream prevents PlaySound(None) in Luna
+                # from canceling this cue and vice versa.
+                play_cue(self._audio[kind])
             except Exception as ex:
+                # Preserve an audible fallback if the PCM device cannot open.
+                try:
+                    import winsound
+                    winsound.MessageBeep(-1)
+                except Exception:
+                    pass
                 if self._error:
-                    self._error(str(ex))
+                    self._error(type(ex).__name__)
 
     def play(self, kind: str):
         if kind not in self._audio:
