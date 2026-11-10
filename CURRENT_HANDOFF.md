@@ -1,5 +1,14 @@
 # Windows 游戏文字助手｜当前交接（2026-11-10 · 区域跟踪实验版）
 
+## 最新进展｜2026-11-10 GitHub 公开 Release 直接下载补救（成功）
+
+- **原因：** 用户反馈旧 Actions artifact 下载慢、无法解压；原 GitHub Actions 链接可能要求登录并多套一层 ZIP。不能据此断言用户本地 ZIP 实际损坏。
+- **独立完整性复核：** 原外层 artifact `BlueStar-FixedRegion-Outer.zip` 为129838758字节，仅包含一个内层 ZIP，CRC 测试通过，SHA256 `de3a5f924806b5f9b9bc52cccab461078dad27ee266ed74adbb6e66719307477`；内层 `GameTextReader_FixedRegion_ThreeModes_Experimental_Windows_x64.zip` 为130279329字节，1194项 ZIP 内容 CRC 全部通过，SHA256 `e58d38a2c2948cda5c6a3d0472b6187e2d527b2c5d2ec3009b9d27e420182430`。原 EXE 未更改，不再重新构建。 
+- **解决：** 在原实验分支上新增专用发布工作流 `.github/workflows/publish-region-experiment.yml`，commit `8b86a382e67cdd6cb69f31c6a37f79fe7bef7965`；使用已通过的 Windows CI artifact 解出内层 ZIP，运行 `sha256sum -c` 与 `unzip -t`，通过后用 GitHub Release 提供单层 ZIP 公开直链，不需要进入 Actions，也不需要双层解压。
+- **Release 发布验证：** [run 42776413685](https://github.com/vobichngan285-collab/-/actions/runs/42776413685) `completed/success`；非 draft 的公开 prerelease [win-region-experiment-20261110](https://github.com/vobichngan285-collab/-/releases/tag/win-region-experiment-20261110)，Release asset id `730542023`，状态 `uploaded`，字节 `130279329`。
+- **给用户的直接 ZIP 地址（不经 Actions 外层）：** https://github.com/vobichngan285-collab/-/releases/download/win-region-experiment-20261110/BlueStarOCR_RegionTracking_Windows_x64.zip 。用户网络经 GitHub CDN 仍可能慢，不能保证本地网络速度；提示放到浏览器下载或使用下载管理器。不要覆盖原有正常版本。
+- 保持实验源码构建 Commit `a93e31e4b034df6e514bd5b314c05ee702378c16`、109 tests passed 与49 UIA 命名控件不变；私人 `config..json` 不公开。旧 artifact 和 Release 均保留，未覆盖旧包或修改安卓仓库。
+
 ## 最新进展｜2026-11-10 固定区域跟踪 OCR 第三模式实验版（Windows CI 已成功）
 
 - **原仓库/基线/隔离：** `vobichngan285-collab/-`；从已通过的 V1.2.1 `997ade1552d097917b8a3121b963c4b45d6844fb` 新建 `exp/windows-fixed-region-tracking-20261110`。成功构建 Commit `a93e31e4b034df6e514bd5b314c05ee702378c16`。未覆盖 V1.2.1、未合入 main 应用代码，安卓 `kanzi-assistant` 未改。
