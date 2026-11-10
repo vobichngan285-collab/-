@@ -417,3 +417,13 @@
 - **GitHub 公开发布：** [run 42800815029](https://github.com/vobichngan285-collab/-/actions/runs/42800815029) completed/success；[Release win-game-bound-20261110](https://github.com/vobichngan285-collab/-/releases/tag/win-game-bound-20261110)，公开 prerelease、非草稿。Windows **单层** ZIP `BlueStarOCR_GameWindowBound_Windows_x64.zip`，130294928 bytes，SHA256 `c819f19aac8e97cd52889d68a70b5e951ec37665227f2f45215f057dfa22c913`，直接地址 https://github.com/vobichngan285-collab/-/releases/download/win-game-bound-20261110/BlueStarOCR_GameWindowBound_Windows_x64.zip；本项目源码 ZIP `BlueStarOCR_GameWindowBound_Source.zip` 130066 bytes，SHA256 `0fde30e7e76d112b16b5dcd0be92e22864321dde5c40d0afdbd4ba1c0297c186`，原版 Luna GPLv3 源码仍随便携包提供。ZIP CRC/EXE/源码检查通过，私人 `config..json` 不公开。
 - **仍未解决/用户验收：** **不能保证《七日杀》切换页面后已经正常朗读，必须在用户 Windows 真机再试**；特别注意即使 HWND 固定，GDI 也可能在某些 DirectX/Vulkan 渲染场景返回旧帧，光标位置也可能来自游戏自绘鼠标而非系统坐标。新版 F8 诊断包含 `window_gdi` 或 `desktop`，若仍有叮声却读不到当前页面文字，下一步仅针对该截图来源问题排查，不重构已工作的语音/识别，不归咎滚轮。
 
+
+
+## Windows GameTextReader 最新游戏窗口绑定版重新打包发布｜2026-11-10
+
+- **用户反馈：** 最近版本在其 Windows 11 电脑“无法解压”，可能与不完整下载或解压程序有关；当前没有原错误信息，不能断言原 ZIP 损坏。
+- **采取措施：** 在原仓库新隔离分支 `pack/windows-bound-zip-7z-recovery-20261110` **仅重打包，不重新编译或修改 EXE**。从原 Windows 121项通过的 CI run 42800465082 获取原冻结构建（实际应用源码 `44c19d3043d52d5d673b03f46f8e5e63b6e92d68`），先核验原始 ZIP 130294928 字节 SHA256 `c819f19aac8e97cd52889d68a70b5e951ec37665227f2f45215f057dfa22c913`，1186源文件CRC全通过，模型与原Luna源码及 EXE 均在。
+- **新压缩格式：** 重新逐文件压缩并加入一次解压说明后为1187文件。Windows Explorer **ZIP_STORED 原生ZIP** `BlueStarOCR_GameTextReader_Windows_ExtractFix_Store.zip`：**282801938字节** SHA256 `cfd2821b62fa9fe9e31f584effb3cff56804c5cf770314d3dda2959942d4e28b`；**7-Zip备用包** `BlueStarOCR_GameTextReader_Windows_ExtractFix_7Zip.7z`：**106024961字节** SHA256 `311ea20cfa19ade8ae4af8870b783d74c592f39503b7e49e8a1b6de6be4da96f`。两个新包都CRC/测试通过、实际完整解压通过，**全部1187文件逐文件SHA256一致**；没有中等模型、私有用户配置。
+- **构建与发布：** GitHub Actions run [42830988762](https://github.com/vobichngan285-collab/-/actions/runs/42830988762) completed/success，workflow SHA `a14d7ebd1d97d154336c5b68c2d5ea84757e3249`。新公开Release [win-game-bound-repack-zip7z-20261110](https://github.com/vobichngan285-collab/-/releases/tag/win-game-bound-repack-zip7z-20261110)，ZIP直链 https://github.com/vobichngan285-collab/-/releases/download/win-game-bound-repack-zip7z-20261110/BlueStarOCR_GameTextReader_Windows_ExtractFix_Store.zip ；7z直链 https://github.com/vobichngan285-collab/-/releases/download/win-game-bound-repack-zip7z-20261110/BlueStarOCR_GameTextReader_Windows_ExtractFix_7Zip.7z 。旧Release/源码不动；不动安卓仓库。
+- **Windows用户解压：** ZIP推荐Windows“全部解压”到 `C:\BlueStarOCR\`，运行解压后的 `GameTextReader\GameTextReader.exe`，不要在 ZIP内运行EXE。若ZIP解压失败用7z+7-Zip；若两种都失败先检验下载大小和SHA256，排除下载被中断。真实游戏跨页识别、微软音色/鼠标快捷键表现仍需用户实机验证。
+
