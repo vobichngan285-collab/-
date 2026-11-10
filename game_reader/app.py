@@ -582,10 +582,12 @@ class ReaderApp:
         made = []
         try:
             made.append(ClickThroughOutline(color=style[0], thickness=style[1]))
+            # Border must remain OUTSIDE the OCR pixels even at 8px thickness.
+            outside_pad = max(3, style[1] + 1)
             made.append(ClickThroughOutline(
-                color=style[0], thickness=style[1], alpha=92, padding=3))
+                color=style[0], thickness=style[1], alpha=92, padding=outside_pad))
             made.append(ClickThroughOutline(
-                color=style[0], thickness=style[1], alpha=215, padding=3))
+                color=style[0], thickness=style[1], alpha=215, padding=outside_pad))
         except Exception as exc:
             for outline in made:
                 outline.close()
@@ -1457,8 +1459,11 @@ class ReaderApp:
         self.mode_generation += 1  # Stale hover OCR must not revive erased text.
         self.pending_full_capture = False
         self._hover_last_text = ""
-        self._region_last_text = ""
-        self._region_prev_lines = []
+        # F6 clears the visible output, not the region's last-seen text:
+        # periodic tracking must not immediately re-speak unchanged labels.
+        if getattr(self, "mouse_mode", "pointer") != "region":
+            self._region_last_text = ""
+            self._region_prev_lines = []
         self.expires_at = None
         self.lines = []
         self._full_capture_window = None
