@@ -385,3 +385,11 @@
 - **最终 Windows Actions** [42762512266](https://github.com/vobichngan285-collab/-/actions/runs/42762512266) 已完成成功，**109 测试通过，1 warning，0 失败**，真实冻结 EXE/Small OCR/未修改原版 Luna/持续语音IPC/UIA 49命名原生控件/F11 三次 Tk picker/五色8px native outline 通过。
 - **便携安装实验包** [artifact 13737813672](https://github.com/vobichngan285-collab/-/actions/runs/42762512266/artifacts/13737813672) 129838758 bytes，有效期 2026-12-10T05:31:57Z，内层 `GameTextReader_FixedRegion_ThreeModes_Experimental_Windows_x64.zip`，不含私有 `config..json`。下载后解压新目录运行 GameTextReader.exe，非 MSI，不覆盖旧版。
 - 用户电脑 Windows 11 / 《七日杀》真实 OCR变化检测、持续 CPU 开销和游戏 FPS、显示器边缘、音频输出仍待确认，不冒称已经真机验收。
+
+## 2026-11-10 · 区域跟踪实验包公开直链发布
+
+- 用户反馈 GitHub Actions artifact 速度慢、无法解压；原 artifact 129838758 bytes 含内层单 ZIP，外层 SHA256 `de3a5f924806b5f9b9bc52cccab461078dad27ee266ed74adbb6e66719307477`。复核内层 130279329 bytes / 1194项，ZIP CRC 测试 0错误，SHA256 `e58d38a2c2948cda5c6a3d0472b6187e2d527b2c5d2ec3009b9d27e420182430`。
+- 新独立 release workflow `.github/workflows/publish-region-experiment.yml` commit `8b86a382e67cdd6cb69f31c6a37f79fe7bef7965`，Actions [42776413685](https://github.com/vobichngan285-collab/-/actions/runs/42776413685) completed/success；从先前成功 Windows 构建直接取内层原字节，SHA256/ZIP 测试通过。未重新编译也未改 app。
+- GitHub 公开 prerelease [win-region-experiment-20261110](https://github.com/vobichngan285-collab/-/releases/tag/win-region-experiment-20261110)，非草稿，asset 730542023，已 uploaded，大小 130279329 bytes：
+  https://github.com/vobichngan285-collab/-/releases/download/win-region-experiment-20261110/BlueStarOCR_RegionTracking_Windows_x64.zip
+- 单层 ZIP，用户直接下载解压后进入 GameTextReader 运行 EXE；无需进入 Actions 页面。GitHub CDN 速度取决于用户实际网络，仍需用户验证。
