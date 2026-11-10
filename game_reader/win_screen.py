@@ -4,6 +4,7 @@ import ctypes
 from ctypes import wintypes
 from dataclasses import dataclass
 from PIL import Image, ImageGrab
+from .luna_capture import capture_rect
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 
@@ -48,7 +49,8 @@ def get_cursor() -> tuple[int, int]:
 
 
 def is_key_down(vk: int) -> bool:
-    return bool(user32.GetAsyncKeyState(int(vk)) & 0x8000)
+    # Wheel events have logical negative IDs, never Win32 virtual-key codes.
+    return vk is not None and int(vk) >= 0 and bool(user32.GetAsyncKeyState(int(vk)) & 0x8000)
 
 
 def monitor_rect_at_point(x: int, y: int) -> tuple[int, int, int, int]:
@@ -70,8 +72,30 @@ def monitor_rect_at_cursor() -> tuple[int, int, int, int]:
 
 def grab_current_monitor() -> tuple[Image.Image, tuple[int, int]]:
     left, top, right, bottom = monitor_rect_at_cursor()
-    img = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
+    img = capture_rect((left, top, right, bottom), foreground_capture_hwnd())
     expected_size = (right - left, bottom - top)
     if img.size != expected_size:
         raise RuntimeError(f"Capture size mismatch: {img.size} vs {expected_size}")
-    return img.convert("RGB"), (left, top)
+    return img, (left, top)
+
+
+def foreground_capture_hwnd() -> int:
+    """Never use our own settings/overlay window as the game capture target."""
+    from .foreground import foreground_window_id
+    handle = foreground_window_id()
+    if not handle:
+        return 0
+    try:
+        user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND,
+                                                    ctypes.POINTER(wintypes.DWORD)]
+        process = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(wintypes.HWND(handle), ctypes.byref(process))
+        import os
+        return handle if process.value != os.getpid() else 0
+    except (OSError, ValueError):
+        return 0
+
+
+def grab_game_rect(box):
+    """Luna-derived HWND-first GDI capture with original desktop fallback."""
+    return capture_rect(box, foreground_capture_hwnd())
