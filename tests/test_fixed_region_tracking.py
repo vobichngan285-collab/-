@@ -186,7 +186,7 @@ def test_region_f11_persists_absolute_box_without_touching_mouse_relative():
 def test_no_overlapping_region_ocr_and_period_or_change_strategy(monkeypatch):
     import game_reader.app as module
     grabbed = Image.new("RGB", (190,90), "#203344")
-    monkeypatch.setattr(module, "grab_game_rect", lambda box: grabbed.copy())
+    monkeypatch.setattr(module, "grab_game_rect", lambda box, hwnd=None: grabbed.copy())
     monkeypatch.setattr(module, "foreground_window_id", lambda:42)
     app=ReaderApp.__new__(ReaderApp)
     app.closed=False
