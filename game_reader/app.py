@@ -21,17 +21,20 @@ from PIL import ImageGrab
 from .core import HoverTracker, OCRLine, hit_test, build_reading_regions
 from .ocr_backend import LocalOCR
 from .win_screen import (enable_dpi_awareness, get_cursor, is_key_down,
-                         grab_current_monitor, monitor_rect_at_cursor, monitor_rect_at_point)
+                         grab_current_monitor, grab_game_rect,
+                         monitor_rect_at_cursor, monitor_rect_at_point)
 from .speech import SpeechWorker, enumerate_sapi_voices
 from .voice_info import preferred_voice_index, narrator_package_names, voice_diagnostic
 from .ms_voice_discovery import (discover_natural_voices, load_user_config,
                                  inspect_local_voice_config)
 from .cues import CuePlayer
-from .hover_modes import (MOUSE_SIDE_VKS, DEFAULT_REGION, RelativeRegion,
+from .hover_modes import (MOUSE_SIDE_VKS, MOUSE_BUTTON_VKS, WHEEL_DOWN,
+                          WHEEL_UP, DEFAULT_REGION, RelativeRegion,
                           HOTKEY_FIELDS, HOTKEY_LABELS, hotkey_label,
                           valid_hotkey, sanitize_hotkeys, parse_period_ms,
                           capture_box, normalized_text, next_mouse_mode,
                           cursor_still_near_capture)
+from .mouse_input import MouseWheelListener
 from .region_picker import ScreenRegionPicker
 from .foreground import foreground_class, foreground_window_id
 from .hover_target import centered_region
@@ -48,7 +51,7 @@ DEFAULTS = {"vk": 0x77, "hotkey_label": "F8",
             "mode_vk": 0x78, "mode_hotkey_label": "F9",
             "local_vk": 0x79, "local_hotkey_label": "F10",
             "pick_vk": 0x7A, "pick_hotkey_label": "F11",
-            "clear_vk": 0x75, "clear_hotkey_label": "F6",
+            "clear_vk": WHEEL_DOWN, "clear_hotkey_label": "滚轮向下",
             "frame_vk": 0x76, "frame_hotkey_label": "F7",
             "period_ms": 500, "region": list(DEFAULT_REGION),
             "fixed_region": None, "fixed_monitor": None,
@@ -72,6 +75,10 @@ def read_settings() -> dict:
     except (OSError, ValueError, TypeError):
         payload = {}
     settings = DEFAULTS | {k: payload[k] for k in DEFAULTS if k in payload}
+    # Upgrade unchanged legacy F6, but preserve all other user bindings.
+    if payload.get("clear_vk") == 0x75 and payload.get("clear_hotkey_label", "F6") == "F6":
+        settings["clear_vk"] = WHEEL_DOWN
+        settings["clear_hotkey_label"] = "滚轮向下"
     settings = sanitize_hotkeys(settings)
     try:
         settings["period_ms"] = parse_period_ms(settings["period_ms"])
@@ -138,7 +145,11 @@ class ReaderApp:
         self.setting_hotkey = False
         self._binding_target = None
         self._hotkey_previous = {k: is_key_down(self.settings[k]) for k in HOTKEY_FIELDS}
-        self._side_previous = {vk: is_key_down(vk) for vk in MOUSE_SIDE_VKS}
+        self._side_previous = {vk: is_key_down(vk) for vk in MOUSE_BUTTON_VKS}
+        self.wheel_listener = MouseWheelListener()
+        self.wheel_listener.start()
+        self._last_wheel_action_at = 0.0
+        self._hover_scan_paused = False
         self.mouse_mode = "pointer"
         self.mode_generation = 0
         self.region_ocr_busy = False
@@ -509,8 +520,8 @@ class ReaderApp:
         tools_row = row(tools)
         ttk.Button(tools_row, text="最小化到任务栏",
                    command=self.root.iconify).pack(side="left")
-        ttk.Button(tools_row, text="清除全部结果",
-                   command=lambda: self.invalidate("已清除全部识别结果。")).pack(
+        ttk.Button(tools_row, text="清除当前模式",
+                   command=self.clear_results).pack(
                        side="left", padx=12)
         ttk.Button(tools_row, text="复制失败诊断",
                    command=self.copy_error).pack(side="left")
@@ -812,11 +823,14 @@ class ReaderApp:
             self.finish_hotkey()
         self.setting_hotkey = True
         self._binding_target = field
-        self._hotkey_button(field).configure(text="请按键／侧键")
-        self._side_previous = {vk: is_key_down(vk) for vk in MOUSE_SIDE_VKS}
+        self._hotkey_button(field).configure(text="请按键／滚轮／中键／侧键")
+        self._side_previous = {vk: is_key_down(vk) for vk in MOUSE_BUTTON_VKS}
+        listener = getattr(self, "wheel_listener", None)
+        if listener is not None:
+            listener.drain()
         self.root.bind("<KeyPress>", self.accept_key)
         self.root.focus_force()
-        self.status("按键盘单键或鼠标侧键1/2进行设置；Esc 取消。")
+        self.status("按单键、滚动滚轮、按中键或侧键1/2进行设置；Esc 取消。")
 
     def _hotkey_button(self, field: str):
         # Resolve only the requested widget; useful for native accessibility
@@ -849,7 +863,7 @@ class ReaderApp:
 
     def _apply_hotkey(self, vk: int, keyname: str = "") -> bool:
         if not valid_hotkey(vk) or self._binding_target is None:
-            self.status("仅接受键盘单键或两枚标准鼠标侧键；不接受左／右点击和修饰键。")
+            self.status("支持单键、滚轮上下、中键及侧键；不接受鼠标左／右点击和修饰键。")
             return False
         field = self._binding_target
         for other in HOTKEY_FIELDS:
@@ -871,7 +885,7 @@ class ReaderApp:
     def _capture_mouse_hotkey(self):
         # Tk KeyPress excludes XBUTTON1/XBUTTON2. Use the same native
         # Windows virtual-key state reader as the actual hotkey dispatcher.
-        for vk in MOUSE_SIDE_VKS:
+        for vk in MOUSE_BUTTON_VKS:
             down = is_key_down(vk)
             old = self._side_previous.get(vk, down)
             self._side_previous[vk] = down
@@ -950,7 +964,7 @@ class ReaderApp:
                     self.overlay.hide()
                 # Screenshot before opening the picker, with our main UI
                 # already invisible. No photo is stored or uploaded.
-                background = ImageGrab.grab(bbox=monitor, all_screens=True)
+                background = grab_game_rect(monitor)
             except Exception:
                 pass  # Fall back to a semi-transparent overlay if capture fails.
             self._picker_snapshot = background
@@ -1051,7 +1065,7 @@ class ReaderApp:
                     image = snapshot.crop((box[0]-ml, box[1]-mt,
                                            box[2]-ml, box[3]-mt))
                 else:
-                    image = ImageGrab.grab(bbox=box, all_screens=True)
+                    image = grab_game_rect(box)
                 capture_ms = round((time.monotonic() - started) * 1000)
                 if image.size != (box[2]-box[0], box[3]-box[1]):
                     raise RuntimeError("框选截图尺寸与实际识别区域不一致")
@@ -1098,6 +1112,7 @@ class ReaderApp:
         announce = bool(self.settings.get("mode_voice_hint", True))
         self._mode_announcement_until = time.monotonic() + (1.6 if announce else 0)
         if desired == "hover":
+            self._hover_scan_paused = False
             self.mouse_mode_var.set("当前：鼠标跟随模式（局部 OCR）")
             self._hover_next_due = max(time.monotonic() + 0.35,
                                        self._mode_announcement_until)
@@ -1249,8 +1264,9 @@ class ReaderApp:
             return False
         box = self._fixed_region_box()
         if box is None:
-            self._region_next_due = time.monotonic() + 1.0
-            if not self._region_invalid_reported:
+            self._region_next_due = (float("inf") if self.settings.get("fixed_region") is None
+                                     else time.monotonic() + 1.0)
+            if not self._region_invalid_reported and self.settings.get("fixed_region") is not None:
                 self.status("固定区域的显示器或分辨率已变化，请按 F11 重新框选。")
                 self._region_invalid_reported = True
             if self.fixed_frame is not None:
@@ -1277,7 +1293,7 @@ class ReaderApp:
                     image = snapshot.crop((box[0] - ml, box[1] - mt,
                                            box[2] - ml, box[3] - mt))
                 else:
-                    image = ImageGrab.grab(bbox=box, all_screens=True)
+                    image = grab_game_rect(box)
                 if image.size != (box[2] - box[0], box[3] - box[1]):
                     raise RuntimeError("固定区域截图尺寸不匹配")
                 sig = screenshot_fingerprint(image)
@@ -1348,7 +1364,8 @@ class ReaderApp:
 
     def start_hover_ocr(self, manual: bool = False):
         """One mouse-relative screenshot; do not queue overlapping OCR jobs."""
-        if (self.closed or self._choosing_region or self.mouse_mode != "hover"):
+        if (self.closed or self._choosing_region or self.mouse_mode != "hover"
+                or (getattr(self, "_hover_scan_paused", False) and not manual)):
             if manual and self.mouse_mode != "hover":
                 self.status("请先用模式快捷键切换到鼠标悬停 OCR。")
             return False
@@ -1380,7 +1397,7 @@ class ReaderApp:
         def work():
             started = time.monotonic()
             try:
-                image = ImageGrab.grab(bbox=box, all_screens=True)
+                image = grab_game_rect(box)
                 capture_ms = round((time.monotonic() - started) * 1000)
                 if image.size != (box[2] - box[0], box[3] - box[1]):
                     raise RuntimeError("局部截图尺寸与显示器范围不一致")
@@ -1481,8 +1498,32 @@ class ReaderApp:
         self.status(reason)
 
     def clear_results(self):
-        """Immediate manual clear; 60-second automatic expiry remains active."""
-        self.invalidate("已手动清空识别结果和朗读；可重新截图。")
+        """One clear key, three distinct and durable mode-specific actions."""
+        mode = getattr(self, "mouse_mode", "pointer")
+        if mode == "hover":
+            self.invalidate("鼠标跟随扫描已停止；重新进入该模式可恢复。")
+            self._hover_scan_paused = True
+            self._hover_next_due = float("inf")
+            if getattr(self, "scan_frame", None) is not None:
+                self.scan_frame.hide()
+        elif mode == "region":
+            self.invalidate("固定区域已删除；按 F11 重新框选后才能识别。")
+            self._region_job_id = getattr(self, "_region_job_id", 0) + 1
+            self.region_ocr_busy = False
+            self._region_next_due = float("inf")
+            self._region_last_fingerprint = None
+            self._region_last_text = ""
+            self._region_prev_lines = []
+            self._region_invalid_reported = False
+            self.settings["fixed_region"] = None
+            self.settings["fixed_monitor"] = None
+            if getattr(self, "fixed_frame", None) is not None:
+                self.fixed_frame.hide()
+            if getattr(self, "region_preview_var", None) is not None:
+                self.region_preview_var.set(self.format_fixed_region())
+            self.persist()
+        else:
+            self.invalidate("已手动清空识别结果和朗读；可重新截图.")
 
     def capture_from_button(self):
         self.root.iconify()
@@ -1670,6 +1711,7 @@ class ReaderApp:
         if moving is None:
             return
         if (blocked or self.mouse_mode != "hover" or
+                getattr(self, "_hover_scan_paused", False) or
                 not self.settings.get("show_scan_frame", True)):
             moving.hide()
             return
