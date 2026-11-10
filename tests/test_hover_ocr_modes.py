@@ -74,7 +74,8 @@ def test_dark_screen_rectangle_is_stored_relative_to_center_crosshair():
 
 def test_mode_toggle_and_dedupe_ignore_whitespace():
     assert next_mouse_mode("pointer") == "hover"
-    assert next_mouse_mode("hover") == "pointer"
+    assert next_mouse_mode("hover") == "region"
+    assert next_mouse_mode("region") == "pointer"
     assert normalized_text("制 作 技 能\n下一页") == normalized_text("制作技能 下一页")
 
 
@@ -249,7 +250,7 @@ def test_real_tk_picker_opens_selects_and_cancels_on_windows():
         root.destroy()
 
 
-def test_every_mode_key_press_switches_immediately_first_hover_second_pointer():
+def test_every_mode_key_press_cycles_pointer_hover_fixed_region_without_delay():
     class Fake:
         def __init__(self):
             self.values = []
@@ -286,15 +287,15 @@ def test_every_mode_key_press_switches_immediately_first_hover_second_pointer():
     app.toggle_mouse_mode()
     assert app.mouse_mode == "hover"
     app.toggle_mouse_mode()
-    assert app.mouse_mode == "pointer"
+    assert app.mouse_mode == "region"
     app.toggle_mouse_mode()
-    assert app.mouse_mode == "hover"
+    assert app.mouse_mode == "pointer"
     assert app.mode_generation == 3
 
 
 def test_f11_global_picker_has_separate_hotkey_and_does_not_conflict():
     from game_reader.hover_modes import HOTKEY_FIELDS, HOTKEY_DEFAULTS, sanitize_hotkeys
-    assert HOTKEY_FIELDS == ("vk", "mode_vk", "local_vk", "pick_vk", "clear_vk")
+    assert HOTKEY_FIELDS == ("vk", "mode_vk", "local_vk", "pick_vk", "clear_vk", "frame_vk")
     d = sanitize_hotkeys({"vk": 119, "mode_vk": 120,
                           "local_vk": 121, "pick_vk": 122, "clear_vk": 117})
     assert [d[k] for k in HOTKEY_FIELDS] == list(HOTKEY_DEFAULTS)
