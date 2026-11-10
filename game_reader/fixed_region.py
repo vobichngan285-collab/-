@@ -80,3 +80,20 @@ def parse_thickness(raw):
     except (ValueError, TypeError):
         return 3
     return n if not isinstance(raw, bool) and 1 <= n <= 8 else 3
+
+
+def fresh_speech_lines(previous: list[str], current: list[str]) -> list[str]:
+    """Speak only newly appearing lines; preserve duplicate-line counts.
+
+    A disappearing line is removed from the previous frame's tally. The next
+    time that same label appears, it is eligible to be spoken again.
+    """
+    from collections import Counter
+    remaining = Counter(previous)
+    additions = []
+    for line in current:
+        if remaining[line] > 0:
+            remaining[line] -= 1
+        else:
+            additions.append(line)
+    return additions
