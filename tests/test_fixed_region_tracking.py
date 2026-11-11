@@ -196,6 +196,7 @@ def test_original_luna_owns_region_capture_analysis_timing_and_ocr(monkeypatch):
     app._region_border_visible = False
     app._region_next_due = 0
     app._fixed_region_box = lambda: (10, 10, 200, 100)
+    app.status = lambda message: None
     requests = []
     app.ocr_worker = SimpleNamespace(
         do_async=lambda method, *values: requests.append((method, values))
