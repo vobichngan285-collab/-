@@ -6,7 +6,8 @@ Change gating never replaces OCR-level textual deduplication.
 """
 from __future__ import annotations
 
-from PIL import Image, ImageChops
+from PIL import Image
+import numpy as np
 
 
 def parse_fixed_region(box, monitor=None):
@@ -48,21 +49,21 @@ def region_on_same_monitor(region, saved_monitor, live_monitor):
                 and parse_fixed_region(region, saved) is not None)
 
 
-def screenshot_fingerprint(image: Image.Image) -> Image.Image:
-    """Tiny grayscale copy (RAM only) for cheap difference detection."""
-    return image.convert("L").resize((128, 72), Image.Resampling.BILINEAR)
+def screenshot_fingerprint(image: Image.Image) -> bytes:
+    """Only 9 KiB of reduced grayscale bytes; retain no screenshot/PIL image."""
+    return image.convert("L").resize((128, 72), Image.Resampling.BILINEAR).tobytes()
 
 
-def frame_has_changed(previous: Image.Image | None, current: Image.Image) -> bool:
-    """Sensitive to changed text, tolerant of minor compression / pixel noise."""
-    if previous is None or previous.size != current.size:
+def frame_has_changed(previous: bytes | None, current: bytes) -> bool:
+    """Compare only tiny byte signatures; preserve original change thresholds."""
+    if previous is None or len(previous) != len(current):
         return True
-    difference = ImageChops.difference(previous, current)
-    histogram = difference.histogram()
-    pixels = current.width * current.height
-    above_threshold = sum(histogram[13:])
-    return (above_threshold >= max(8, int(pixels * 0.008))
-            or sum(i * n for i,n in enumerate(histogram)) >= pixels * 1.8)
+    pixels = len(current)
+    old = np.frombuffer(previous, dtype=np.uint8).astype(np.int16)
+    new = np.frombuffer(current, dtype=np.uint8).astype(np.int16)
+    difference = np.abs(new - old)
+    return (np.count_nonzero(difference >= 13) >= max(8, int(pixels * 0.008))
+            or int(difference.sum()) >= pixels * 1.8)
 
 
 def parse_strategy(raw):
