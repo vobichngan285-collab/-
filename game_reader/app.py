@@ -662,7 +662,9 @@ class ReaderApp:
             return
         self._region_border_visible = not self._region_border_visible
         self.update_scan_frame()
-        self.ocr_worker.do_async("request_border", self._region_border_visible)
+        engine = getattr(self, "ocr_worker", None)
+        if engine is not None:
+            engine.do_async("request_border", self._region_border_visible)
         self.status("区域框已显示。" if self._region_border_visible else "区域框已隐藏。")
 
     def save_visual_settings(self):
@@ -1124,7 +1126,9 @@ class ReaderApp:
         announce = bool(self.settings.get("mode_voice_hint", True))
         self._mode_announcement_until = time.monotonic() + (1.6 if announce else 0)
         if desired != "region":
-            self.ocr_worker.do_async("request_pause")
+            engine = getattr(self, "ocr_worker", None)
+            if engine is not None:
+                engine.do_async("request_pause")
         if desired == "hover":
             self._hover_scan_paused = False
             self.mouse_mode_var.set("当前：鼠标跟随模式（局部 OCR）")
@@ -1147,7 +1151,9 @@ class ReaderApp:
             if box is not None:
                 self.start_region_scan()
             else:
-                self.ocr_worker.do_async("request_pause")
+                engine = getattr(self, "ocr_worker", None)
+                if engine is not None:
+                    engine.do_async("request_pause")
             if announce:
                 self.speak_selected("区域跟踪")
             # Prompt announcement is not allowed to hold back a new F11 capture.
@@ -1488,7 +1494,9 @@ class ReaderApp:
             self._region_invalid_reported = False
             self.settings["fixed_region"] = None
             self.settings["fixed_monitor"] = None
-            self.ocr_worker.do_async("request_clear")
+            engine = getattr(self, "ocr_worker", None)
+            if engine is not None:
+                engine.do_async("request_clear")
             if getattr(self, "fixed_frame", None) is not None:
                 self.fixed_frame.hide()
             if getattr(self, "region_preview_var", None) is not None:
