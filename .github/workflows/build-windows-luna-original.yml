@@ -130,7 +130,7 @@ jobs:
           # The only extra Python file is the BlueStar socket I/O bridge.
           # It calls original imageCutEx, ocr_run and ocrtext directly;
           # NONE of the author's OCR source modules are modified.
-          $pluginFolder = Join-Path $target 'files/LunaTranslator/textio/textoutput'
+          $pluginFolder = Join-Path $target 'LunaTranslator/textio/textoutput'
           if (-not (Test-Path (Join-Path $pluginFolder 'websocket.py'))) {
             throw "Official original textoutput plugin folder was not found: $pluginFolder"
           }
