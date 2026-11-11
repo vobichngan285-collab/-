@@ -195,6 +195,18 @@ class LunaOriginalOCR:
             self._controls.put((operation, values))
 
     def close(self):
+        # A process launched ONLY by this BlueStar instance must not keep
+        # scanning the user's game after BlueStar exits.
+        owned = self.proc is not None and self.proc.poll() is None
+        if owned:
+            try:
+                self._call("pause", timeout=0.6, start=False)
+            except (OSError, TimeoutError, ValueError, RuntimeError):
+                pass
+            try:
+                self.proc.terminate()
+            except OSError:
+                pass
         self._stop.set()
         self._controls.put(None)
         if self._udp is not None:
@@ -202,5 +214,4 @@ class LunaOriginalOCR:
                 self._udp.close()
             except OSError:
                 pass
-        # Do not kill the upstream original GUI unexpectedly; the user may
-        # continue using its settings, performance tools and range UI.
+        # An independently started original Luna instance is never terminated.
