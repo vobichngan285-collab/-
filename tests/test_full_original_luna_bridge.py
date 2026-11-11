@@ -72,5 +72,5 @@ def test_original_plugin_must_not_implement_ocr_algorithms():
     assert "source.newrangeadjustor()" in text
     assert "source.setrect(QRect" in text
     assert not any(term in text for term in (
-        "RapidOCR(", "ImageGrab.grab", "cv2.", "OcrDetect(", "BitBlt("))
+        "RapidOCR(", "ImageGrab.grab", "cv2.", "OcrDetect(", "BitBlt("
     )
