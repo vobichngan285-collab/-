@@ -39,6 +39,7 @@ from .region_picker import ScreenRegionPicker
 from .foreground import foreground_class, foreground_window_id
 from .game_window import GameWindowBinding
 from .hover_target import centered_region
+from .luna_native_region import grab_region_original
 from .fixed_region import (parse_fixed_region, parse_monitor, region_on_same_monitor,
                            screenshot_fingerprint, frame_has_changed,
                            parse_strategy, display_color, parse_thickness, fresh_speech_lines)
@@ -160,6 +161,7 @@ class ReaderApp:
         self._region_last_fingerprint = None
         self._region_last_text = ""
         self._region_prev_lines = []
+        self._region_last_ocr_at = 0.0
         self._region_invalid_reported = False
         self._region_last_window = None
         self._region_border_visible = True
@@ -1035,6 +1037,7 @@ class ReaderApp:
             self._region_last_fingerprint = None
             self._region_last_text = ""
             self._region_prev_lines = []
+            self._region_last_ocr_at = 0.0
             self._region_border_visible = bool(self.settings.get("show_scan_frame", True))
             self.region_preview_var.set(self.format_fixed_region())
             self.persist()
@@ -1112,6 +1115,7 @@ class ReaderApp:
         self._region_last_fingerprint = None
         self._region_last_text = ""
         self._region_prev_lines = []
+        self._region_last_ocr_at = 0.0
         self._region_next_due = float("inf")
         self._hover_last_text = ""
         self._hover_spoken_cursor = None
@@ -1292,6 +1296,13 @@ class ReaderApp:
         strategy = parse_strategy(self.settings["region_strategy"])
         period = (self.settings["region_period_ms"] if strategy == "period"
                   else 300)
+        # Exact policy from author's rangemanger.getresauto(): full OCR is
+        # gated by time since the *previous OCR completed*, not its start.
+        # Here timestamps use monotonic seconds to avoid clock jumps.
+        done_at = getattr(self, "_region_last_ocr_at", 0.0)
+        if not force and done_at and time.monotonic() - done_at < period / 1000.0:
+            self._region_next_due = done_at + period / 1000.0
+            return False
         self._region_next_due = time.monotonic() + period / 1000.0
         old_signature = self._region_last_fingerprint
         generation = self.mode_generation
@@ -1308,8 +1319,9 @@ class ReaderApp:
                     image = snapshot.crop((box[0] - ml, box[1] - mt,
                                            box[2] - ml, box[3] - mt))
                 else:
-                    image = (grab_game_rect(box, start_focus)
-                             if start_focus else grab_game_rect(box))
+                    # Upstream author's original NativeUtils.dll GdiCropImage,
+                    # desktop-only (never stale game-HWND BitBlt frames).
+                    image = grab_region_original(box)
                 if image.size != (box[2] - box[0], box[3] - box[1]):
                     raise RuntimeError("固定区域截图尺寸不匹配")
                 sig = screenshot_fingerprint(image)
@@ -1354,6 +1366,7 @@ class ReaderApp:
         self._region_last_fingerprint = fingerprint
         if lines is None:
             return  # Same pixels: avoid model inference and speech.
+        self._region_last_ocr_at = time.monotonic()
         regions = build_reading_regions(lines)
         raw = "\n".join(r.text for r in regions).strip()
         speech_text = filter_speech_text(raw, self.settings)
@@ -1534,6 +1547,7 @@ class ReaderApp:
             self._region_last_fingerprint = None
             self._region_last_text = ""
             self._region_prev_lines = []
+            self._region_last_ocr_at = 0.0
             self._region_invalid_reported = False
             self.settings["fixed_region"] = None
             self.settings["fixed_monitor"] = None
