@@ -1,0 +1,91 @@
+name: Verify RELEASED Luna complete original OCR live IPC
+on:
+  workflow_dispatch:
+  push:
+    branches: ['feat/windows-original-luna-ocr-bridge-20261112']
+    paths:
+      - '.github/workflows/verify-luna-original-runtime.yml'
+permissions:
+  contents: read
+jobs:
+  live-original-runtime:
+    runs-on: windows-latest
+    timeout-minutes: 22
+    steps:
+      - name: Obtain exact already-published experimental ZIP
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory "$env:RUNNER_TEMP/luna_release" -Force | Out-Null
+          gh release download win-full-original-luna-integrated-20261112 --repo $env:GITHUB_REPOSITORY --pattern 'BlueStarOCR_FullOriginalLunaIntegrated_Windows_x64.zip' --dir "$env:RUNNER_TEMP/luna_release"
+          if ($LASTEXITCODE -ne 0) { throw "release download failed" }
+          $zip = "$env:RUNNER_TEMP/luna_release/BlueStarOCR_FullOriginalLunaIntegrated_Windows_x64.zip"
+          $sha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($sha -ne '638419932c7dfa34b63a34d85c988e72f0e20165ea227684ee9dc9323534cc4e') {
+            throw "Published ZIP SHA256 not what was built: $sha"
+          }
+          Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP/unpacked" -Force
+          if (-not (Test-Path "$env:RUNNER_TEMP/unpacked/GameTextReader/GameTextReader.exe")) { throw 'GameTextReader EXE missing' }
+          if (-not (Test-Path "$env:RUNNER_TEMP/unpacked/GameTextReader/LunaOriginal/LunaTranslator_x64/LunaTranslator.exe")) { throw 'Original upstream GUI missing' }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run REAL original Luna region-setup, border, clear and OCR IPC
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cwd = "$env:RUNNER_TEMP/unpacked/GameTextReader/LunaOriginal/LunaTranslator_x64"
+          $exe = Join-Path $cwd 'LunaTranslator.exe'
+          $proc = Start-Process -FilePath $exe -WorkingDirectory $cwd -ArgumentList @('--userconfig', 'userconfig_bluestar') -PassThru
+          try {
+            @'
+          import json
+          import socket
+          import time
+          def request(action, **kwargs):
+              data = json.dumps(dict(action=action, **kwargs), ensure_ascii=False).encode('utf-8') + b'\n'
+              deadline = time.monotonic() + 30
+              while time.monotonic() < deadline:
+                  try:
+                      with socket.create_connection(('127.0.0.1', 29380), timeout=1.5) as sock:
+                          sock.settimeout(16)
+                          sock.sendall(data)
+                          response = bytearray()
+                          while b'\n' not in response and len(response) < 2_000_000:
+                              part = sock.recv(8192)
+                              if not part:
+                                  break
+                              response.extend(part)
+                          assert b'\n' in response, ('empty', action)
+                          return json.loads(bytes(response).split(b'\n',1)[0].decode('utf8'))
+                  except (ConnectionRefusedError, ConnectionResetError, TimeoutError, OSError):
+                      time.sleep(0.25)
+              raise RuntimeError('Original Luna IPC unavailable for action: '+action)
+          assert request('ping')['ok'], 'original source not available'
+          print('PASS real original Luna startup and local IPC')
+          # First pause the original scan to prevent a large inference while
+          # exercising original Qt GUI range management.
+          p = request('pause')
+          assert p.get('ok'), ('pause',p)
+          print('PASS original ocrtext.pause_recognition')
+          r = request('region',box=[80,80,350,260])
+          assert r.get('ok'), ('original region',r)
+          print('PASS original ocrtext.clearrange/newrangeadjustor/setrect')
+          b = request('border',visible=False)
+          assert b.get('ok'), ('original border hide',b)
+          print('PASS original ocrtext.showhiderangeui(False)')
+          c = request('clear')
+          assert c.get('ok'), ('original clear region',c)
+          print('PASS original ocrtext.clearrange')
+          # Direct one-shot uses ONLY original imageCutEx+ocr_run+CVUtils.
+          result = request('ocr',box=[80,80,430,260])
+          assert result.get('ok'), ('ORIGINAL FULL OCR FAILED',result)
+          assert isinstance(result.get('result'),dict), result
+          assert isinstance(result['result'].get('results'),list), result
+          print('PASS original native screenshot + CVUtils model + original OCR results response', len(result['result']['results']))
+          '@ | python -
+            if ($LASTEXITCODE -ne 0) { throw "Real original OCR IPC smoke failed" }
+          } finally {
+            if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          }
