@@ -53,6 +53,11 @@ class _ChangeRegion:
                         source.newrangeadjustor()
                         source.setrect(QRect(left, top, right-left, bottom-top))
                         payload["ok"] = True
+                    elif action == "clear":
+                        source = gobject.base.textsource
+                        if source is not None and hasattr(source, "clearrange"):
+                            source.clearrange()
+                        payload["ok"] = True
                     elif action == "pause":
                         source = gobject.base.textsource
                         if source is not None and hasattr(source, "pause_recognition"):
@@ -154,7 +159,7 @@ class Outputer(Base):
                         raise RuntimeError("Original Luna imageCutEx returned empty image")
                     parsed = ocr_run(image)
                     result = {"ok": not bool(parsed.error), "result": parsed.json}
-                elif action in ("region", "pause", "resume", "border"):
+                elif action in ("region", "clear", "pause", "resume", "border"):
                     if action == "region":
                         kw = {"box": _bounded_region(request.get("box"))}
                     elif action == "border":
