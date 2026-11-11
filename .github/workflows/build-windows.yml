@@ -2,7 +2,7 @@ name: Build Blue Star OCR fixed-region three-mode experiment
 on:
   workflow_dispatch:
   push:
-    branches: ['exp/v12-clean-blue-a11y-filtered-mouse-20261110', 'feat/windows-v12-cursor-drag-clear-speed-20261110', 'feat/windows-v121-cue-cleanui-voice-latency-20261110', 'exp/windows-fixed-region-tracking-20261110', 'feat/windows-game-capture-mouse-clear-speed-20261110', 'fix/windows-luna-bound-game-window-20261110', 'fix/windows-simple-visible-capture-fast-20261111', 'fix/windows-f7-border-only-20261112']
+    branches: ['exp/v12-clean-blue-a11y-filtered-mouse-20261110', 'feat/windows-v12-cursor-drag-clear-speed-20261110', 'feat/windows-v121-cue-cleanui-voice-latency-20261110', 'exp/windows-fixed-region-tracking-20261110', 'feat/windows-game-capture-mouse-clear-speed-20261110', 'fix/windows-luna-bound-game-window-20261110', 'fix/windows-simple-visible-capture-fast-20261111', 'fix/windows-f7-border-only-20261112', 'feat/windows-luna-original-native-region-20261112']
     paths:
       - 'game_reader/**'
       - 'main.py'
@@ -73,6 +73,20 @@ jobs:
           if ($targetSha -ne $exeSha) { throw 'Copy modified the original Luna EXE' }
           Write-Output "PASS ORIGINAL AUTHOR EXE: size=$((Get-Item $original).Length), SHA256=$exeSha"
 
+          # Call the UNCHANGED upstream native screenshot code, not a reimplementation.
+          $nativeList = @(Get-ChildItem -Path $unpack -Recurse -File -Filter 'NativeUtils.dll')
+          if ($nativeList.Count -ne 1) {
+            throw "Expected exactly one official NativeUtils.dll; found $($nativeList.Count)"
+          }
+          $nativeFile = $nativeList[0].FullName
+          $nativeTarget = 'dist/GameTextReader/NativeUtils.dll'
+          Copy-Item $nativeFile $nativeTarget -Force
+          $nativeHash = (Get-FileHash $nativeFile -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ((Get-FileHash $nativeTarget -Algorithm SHA256).Hash.ToLowerInvariant() -ne $nativeHash) {
+            throw 'Author NativeUtils.dll byte-for-byte match failed'
+          }
+          Write-Output "PASS ORIGINAL AUTHOR NativeUtils.dll: $nativeHash (source=$nativeFile)"
+
           $src = Join-Path $env:RUNNER_TEMP 'LunaTranslator_v12.1.3.9_original_source'
           git clone --depth 1 --branch v12.1.3.9 --filter=blob:none https://github.com/HIllya51/LunaTranslator.git $src
           if ($LASTEXITCODE -ne 0) { throw 'Official source clone failed' }
@@ -87,6 +101,10 @@ jobs:
             'basettsclass.py' = 'src/LunaTranslator/tts/basettsclass.py'
             'msnaturalvoice.cpp' = 'src/NativeImpl/LunaSubprocess/msnaturalvoice.cpp'
             'pipehost.hpp' = 'src/NativeImpl/LunaSubprocess/pipehost.hpp'
+            'screenshot.cpp' = 'src/NativeImpl/NativeUtils/screenshot.cpp'
+            'bmpx.hpp' = 'src/NativeImpl/NativeUtils/bmpx.hpp'
+            'ocrtext.py' = 'src/LunaTranslator/textio/textsource/ocrtext.py'
+            'NativeUtils.py' = 'src/LunaTranslator/NativeUtils.py'
             'LICENSE' = 'LICENSE'
           }
           foreach ($item in $sources.GetEnumerator()) {
@@ -103,6 +121,23 @@ jobs:
             throw 'GPLv3 exact upstream source archive missing'
           }
           Write-Output 'PASS: exact original author executable and source archive are bundled'
+      - name: Verify the exact author's DLL loads and exposes native GdiCropImage
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:PYTHONPATH = (Get-Location).Path
+          @'
+          from pathlib import Path
+          from game_reader import luna_native_region as luna
+          luna._original_dll_path = lambda: Path("dist/GameTextReader/NativeUtils.dll").resolve()
+          if not luna.original_available():
+              raise SystemExit("Original author's NativeUtils.dll cannot load; refuse release")
+          # Call original C++ once (desktop-only): no game HWND, no OCR settings.
+          image = luna.native_crop_desktop((0, 0, 128, 96))
+          print("PASS Luna original NativeUtils.dll export loaded; desktop test:",
+                image.size if image is not None else "blank Windows runner desktop")
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Original author DLL smoke test failed' }
       - name: Remove duplicated RapidOCR model weights
         shell: pwsh
         run: |
@@ -276,7 +311,7 @@ jobs:
           retention-days: 30
 
       - name: Verify portable ZIP and publish new isolated experimental release
-        if: github.ref_name == 'fix/windows-f7-border-only-20261112'
+        if: github.ref_name == 'feat/windows-luna-original-native-region-20261112'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -298,27 +333,31 @@ jobs:
             }
             Write-Output "PASS ZIP extraction and all $count entry reads"
           } finally { $archive.Dispose() }
-          $out = 'release/BlueStarOCR_F7BorderOnly_Windows_x64.zip'
+          $out = 'release/BlueStarOCR_LunaOriginalNative_Windows_x64.zip'
           Copy-Item $original $out
-          git archive --format=zip --output='release/BlueStarOCR_F7BorderOnly_Source.zip' HEAD
+          git archive --format=zip --output='release/BlueStarOCR_LunaOriginalNative_Source.zip' HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Source archive failed' }
-          foreach ($file in @($out, 'release/BlueStarOCR_F7BorderOnly_Source.zip')) {
+          foreach ($file in @($out, 'release/BlueStarOCR_LunaOriginalNative_Source.zip')) {
             Write-Output "$file SHA256=$((Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()) size=$((Get-Item $file).Length)"
           }
-          $tag = 'win-f7-border-only-20261112'
+          $tag = 'win-luna-original-native-region-20261112'
           $notes = @"
-          Windows 11 x64 GameTextReader based on EXACT stable November 11, 2026 visible-screen OCR build.
-          User reports November 12 region-optimization experiment reduced recognition; those changes are NOT included.
-          ONLY one game_reader/app.py line was removed: do not reset F7 border visibility on return to region mode.
-          F7 hide/show persists when switching between the three modes; changes only visual border state.
-          ORIGINAL PP-OCRv6 Small, image capture, 300ms scan cadence, OCR detection, and speech are unchanged.
-          Original input hotkeys and accessibility controls unchanged. New regression tests cover hidden/visible state.
-          Separate portable ZIP: extract into a NEW folder; do not overwrite original working version.
-          No user's personal voice/license configs, screenshots or recognized text are included.
-          Original LunaTranslator GPL source and independently available project source included.
-          Real-game F7 and OCR behavior still need user machine verification.
+          GameTextReader based on November 11 user-reported good OCR, with the independent F7 one-line border fix.
+          Fixed region tracking calls author's UNMODIFIED NativeUtils.dll v12.1.3.9
+          GdiCropImage(NULL, selected coordinates, callback, curr=1): native desktop ONLY.
+          Unlike earlier broken game-HWND GDI capture, this does not read HWND pixels.
+          If original native desktop returns invalid pixels or cannot load, automatically
+          use the unchanged previous Pillow visible-screen capture, with full OCR precision.
+          Periodic full OCR follows LunaTranslator ocrtext.py lastocrtime gate:
+          wait 300ms after PREVIOUS OCR COMPLETES, while never overlapping one OCR job.
+          Original region change gate, original PP-OCRv6 Small, F8, audio,
+          game window binding, 15ms hotkeys, settings and accessibility preserved.
+          Original upstream DLL, exact screenshot.cpp, ocrtext.py and full GPLv3 source included.
+          Real game CPU/frames and picture freshness need end-user Windows validation.
+          Separate ZIP. Extract into a new folder, never overwrite the previous good version.
+          No private voice configs, photos, OCR words or keys were uploaded.
           "@
-          gh release create $tag $out 'release/BlueStarOCR_F7BorderOnly_Source.zip' --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --prerelease --title 'Blue Star OCR - Original OCR with F7 Border Switch Fix'  --notes $notes
+          gh release create $tag $out 'release/BlueStarOCR_LunaOriginalNative_Source.zip' --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --prerelease --title 'Blue Star OCR - Original Luna Native Region Capture and Complete-Time Scheduling'  --notes $notes
           if ($LASTEXITCODE -ne 0) { throw 'Release publishing failed' }
           gh release view $tag --repo $env:GITHUB_REPOSITORY --json isDraft,isPrerelease,assets,url
           if ($LASTEXITCODE -ne 0) { throw 'Release verification failed' }
