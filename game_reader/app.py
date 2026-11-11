@@ -1391,7 +1391,6 @@ class ReaderApp:
         if is_repeat_speech(previous_text, normalized, self.settings):
             return
         additions = fresh_speech_lines(previous_lines, current_lines)
-        self.update_output(raw)
         if not additions:
             return
         self.speak_selected("\n".join(additions)[:1900])
@@ -1462,6 +1461,9 @@ class ReaderApp:
                              manual: bool, elapsed: int,
                              capture_cursor=None, capture_foreground=None,
                              timings=None):
+        # A retired mode's result must never unlock a newer OCR task.
+        if generation != self.mode_generation:
+            return
         self.hover_ocr_busy = False
         # Start-to-start interval: slow inference should not add another full
         # period before a fresh scan. 60ms prevents a tight CPU spin.
@@ -1712,6 +1714,8 @@ class ReaderApp:
                             self.status("固定区域 OCR 失败；下一轮将重试，详细信息可复制。")
                 elif kind == "hover_fail":
                     _, generation, detail = event
+                    if generation != self.mode_generation:
+                        continue
                     self.hover_ocr_busy = False
                     self._hover_next_due = (time.monotonic() +
                                             max(1.0, self.settings["period_ms"] / 1000.0))
