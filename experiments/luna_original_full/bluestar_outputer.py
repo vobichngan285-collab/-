@@ -30,11 +30,15 @@ class _ChangeRegion:
     """Tiny Qt-thread dispatcher; all actual OCR/region functions remain upstream."""
     def __init__(self):
         from qtsymbols import QObject, pyqtSignal, Qt, QApplication
+        try:
+            from PyQt5.QtCore import pyqtSlot
+        except ImportError:
+            from PyQt6.QtCore import pyqtSlot
         class Dispatcher(QObject):
             change = pyqtSignal(object)
             def __init__(self):
                 super().__init__()
-                self.change.connect(self.apply, Qt.ConnectionType.QueuedConnection)
+            @pyqtSlot(object)
             def apply(self, payload):
                 try:
                     import gobject
@@ -85,6 +89,11 @@ class _ChangeRegion:
         if app is None:
             raise RuntimeError("Luna original Qt app has not started")
         self._dispatcher.moveToThread(app.thread())
+        # Register AFTER move; Qt dispatches to the real QApp UI event thread.
+        # An undecorated Python callback connected from Outputer's worker
+        # thread builds a proxy without an event loop and NEVER receives it.
+        self._dispatcher.change.connect(
+            self._dispatcher.apply, Qt.ConnectionType.QueuedConnection)
 
     def request(self, action, **kw):
         payload = dict(action=action, done=threading.Event(), **kw)
