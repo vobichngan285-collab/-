@@ -1,0 +1,160 @@
+name: LunaTranslator complete ORIGINAL OCR upstream experiment
+on:
+  workflow_dispatch:
+  push:
+    branches: ['exp/windows-luna-complete-original-20261112']
+    paths:
+      - '.github/workflows/luna-complete-original.yml'
+      - 'experiments/luna_original_full/**'
+permissions:
+  contents: write
+
+jobs:
+  original-upstream:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch official FULL original runtime and pinned FULL source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = (Get-Location).Path
+          $releaseUrl = 'https://github.com/HIllya51/LunaTranslator/releases/download/v12.1.3.9/LunaTranslator_x64.zip'
+          $zip = Join-Path $env:RUNNER_TEMP 'LunaTranslator_Official_v12.1.3.9_x64.zip'
+          Invoke-WebRequest -Uri $releaseUrl -OutFile $zip
+          $sum = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($sum -ne 'c0248288c12de19e9e1f953922355aaa123699820fce26e4e84329be2666d62f') {
+            throw "Official release SHA256 changed: $sum"
+          }
+          Write-Output "VERIFIED original author ZIP hash: $sum"
+          $src = Join-Path $env:RUNNER_TEMP 'LunaTranslator_UPSTREAM_SOURCE_v12.1.3.9'
+          git clone --depth 1 --branch v12.1.3.9 --filter=blob:none https://github.com/HIllya51/LunaTranslator.git $src
+          if ($LASTEXITCODE -ne 0) { throw 'Clone original upstream failed' }
+          $commit = (git -C $src rev-parse HEAD).Trim()
+          if ($commit -ne '84677faeaa1e61bd7dd00b820090e9d2fe6c5142') {
+            throw "Official tag mismatch: $commit"
+          }
+          Write-Output "VERIFIED upstream full source commit: $commit"
+          $stage = Join-Path $root 'release/LunaTranslator_CompleteOriginal'
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          Expand-Archive -Path $zip -DestinationPath $stage -Force
+          $launcher = @(Get-ChildItem $stage -Recurse -File -Filter 'LunaTranslator.exe' |
+                        Where-Object { $_.FullName -notmatch 'upstream_' })
+          if ($launcher.Count -ne 1) {
+            throw "Expected one official program exe; got $($launcher.Count)"
+          }
+          Write-Output "ORIGINAL launcher: $($launcher[0].FullName)"
+          # Confirm the original OCR modules are PRESENT and identical to pinned source.
+          $must = @(
+            'src/LunaTranslator/textio/textsource/ocrtext.py',
+            'src/LunaTranslator/myutils/ocrutil.py',
+            'src/LunaTranslator/ocrengines/baseocrclass.py',
+            'src/LunaTranslator/ocrengines/local.py',
+            'src/LunaTranslator/ocrengines/windowsocr.py',
+            'src/LunaTranslator/CVUtils.py',
+            'src/NativeImpl/NativeUtils/screenshot.cpp',
+            'src/NativeImpl/NativeUtils/bmpx.hpp',
+            'src/LunaTranslator/network/server/servicecollection.py',
+            'LICENSE'
+          )
+          foreach ($name in $must) {
+            if (-not (Test-Path (Join-Path $src $name))) {
+              throw "Upstream core missing $name"
+            }
+          }
+          # All files, not just selected modules, are archived verbatim.
+          $srczip = Join-Path $stage 'UPSTREAM_FULL_SOURCE_v12.1.3.9.zip'
+          git -C $src archive --format=zip --output=$srczip HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Source export failed' }
+          $list = git -C $src ls-tree -r --name-only HEAD
+          Write-Output "Full pinned upstream source file count: $(($list | Measure-Object).Count)"
+          Write-Output "Full original source SHA256: $((Get-FileHash $srczip -Algorithm SHA256).Hash.ToLowerInvariant())"
+          Copy-Item 'experiments/luna_original_full/README_请先阅读.txt' (Join-Path $stage 'README_请先阅读.txt')
+          # The author runtime was NOT patched, rebuilt or disassembled.
+          # Verify all bytes of the publisher's original files via a per-file
+          # manifest against a second pristine unzip of the same verified zip.
+          $pristine = Join-Path $env:RUNNER_TEMP 'upstream_pristine_compare'
+          Expand-Archive -Path $zip -DestinationPath $pristine
+          $origFiles = @(Get-ChildItem $pristine -Recurse -File)
+          foreach ($file in $origFiles) {
+            $rel = $file.FullName.Substring($pristine.Length).TrimStart('\')
+            $to = Join-Path $stage $rel
+            if (-not (Test-Path $to) -or
+                (Get-FileHash $to -Algorithm SHA256).Hash -ne
+                (Get-FileHash $file.FullName -Algorithm SHA256).Hash) {
+              throw "Original runtime was altered: $rel"
+            }
+          }
+          Write-Output "PASS ORIGINAL RUNTIME UNMODIFIED: $($origFiles.Count) files exact matches"
+          Write-Output "Luna original model folders in runtime:"
+          Get-ChildItem $stage -Recurse -Directory -Filter 'ocrmodel' |
+            ForEach-Object { Write-Output $_.FullName }
+          Write-Output "Luna original ONNX files already packaged:"
+          @(Get-ChildItem $stage -Recurse -File -Filter '*.onnx').Count
+
+      - name: Pack intact original runtime plus FULL verbatim source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = 'release/LunaTranslator_CompleteOriginal'
+          $zip = 'release/BlueStar_Luna_CompleteOriginal_OCR_Experiment.zip'
+          Compress-Archive -Path $path -DestinationPath $zip -CompressionLevel Optimal
+          $zipfile = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip).Path)
+          try {
+            $files = @($zipfile.Entries | ForEach-Object FullName)
+            if (-not ($files -match 'UPSTREAM_FULL_SOURCE_v12.1.3.9.zip')) {
+              throw 'Missing complete author source archive'
+            }
+            if (-not ($files -match 'LunaTranslator.exe')) {
+              throw 'Missing author launcher'
+            }
+            if (-not ($files -match 'ocrtext.py') -and
+                -not ($files -match 'UPSTREAM_FULL_SOURCE_v12.1.3.9.zip')) {
+              throw 'Missing upstream OCR source'
+            }
+            $total = 0
+            foreach ($file in $zipfile.Entries) {
+              if (-not $file.Name) { continue }
+              $stream = $file.Open()
+              try { $stream.CopyTo([System.IO.Stream]::Null) } finally { $stream.Dispose() }
+              $total++
+            }
+            Write-Output "PASS all $total ZIP file streams verified"
+          } finally { $zipfile.Dispose() }
+          Write-Output "Release ZIP SHA256: $((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant())"
+          Write-Output "Release ZIP size: $((Get-Item $zip).Length)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LunaTranslator-COMPLETE-Original-OCR-Experiment
+          path: release/BlueStar_Luna_CompleteOriginal_OCR_Experiment.zip
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish isolated source-faithful full-original baseline release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = 'win-luna-complete-original-experiment-20261112'
+          $path = 'release/BlueStar_Luna_CompleteOriginal_OCR_Experiment.zip'
+          $notes = @"
+          An isolated experimental bundle containing the UNMODIFIED OFFICIAL
+          LunaTranslator v12.1.3.9 full x64 runtime and its ENTIRE
+          pinned GitHub source (commit 84677faeaa1e61bd7dd00b820090e9d2fe6c5142).
+          This is the ORIGINAL AUTHOR'S OCR pipeline: original image capture,
+          regions, scheduling, similarity, text processing, CVUtils.dll inference,
+          engine configuration, Qt runtime, and all supporting dependencies.
+          No GameTextReader or custom Python OCR algorithm is included in this bundle.
+          This is a stand-alone upstream performance reference, NOT YET a working
+          replacement backend in GameTextReader. Do not mistake packaging for integration.
+          Use the original GUI to select the OCR model, 300ms interval, capture region.
+          GPU/CPU options and installed model files affect performance. Underlying
+          game FPS must be verified by the user in the same conditions.
+          The user's good November 11 GameTextReader executable is untouched.
+          The exact full source and GPLv3 license are included.
+          No user settings or private voice licenses are uploaded.
+          "@
+          gh release create $tag $path --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --prerelease --title 'Isolated full ORIGINAL LunaTranslator OCR baseline (not integrated)' --notes $notes
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to publish complete original experiment' }
+          gh release view $tag --repo $env:GITHUB_REPOSITORY --json isDraft,isPrerelease,assets,url
