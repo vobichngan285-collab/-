@@ -218,8 +218,16 @@ jobs:
             $file = Join-Path "dist/GameTextReader/_internal/models" $name
             if (-not (Test-Path $file)) { throw "Missing offline ONNX: $name" }
           }
+          # This experimental bundle deliberately includes TWO independent
+          # systems: the untouched author's original full OCR model and the
+          # legacy Small model retained only for frozen EXE self-test/rollback.
+          # The shipped app delegates recognition ONLY to original Luna.
+          $legacy = @(Get-ChildItem "dist/GameTextReader/_internal/models" -Filter '*.onnx' -File)
+          if ($legacy.Count -ne 2) { throw "Expected 2 legacy frozen self-test weights, got $($legacy.Count)" }
+          $original = @(Get-ChildItem "dist/GameTextReader/LunaOriginal/LunaTranslator_x64/files/ocrmodel" -Recurse -Filter '*.onnx' -File)
+          if ($original.Count -ne 2) { throw "Expected 2 official Luna bundled model weights, got $($original.Count)" }
           $allOnnx = @(Get-ChildItem "dist/GameTextReader" -Recurse -Filter '*.onnx')
-          if (@($allOnnx).Count -ne 2) { throw "Expected exactly 2 Small model weights, got $(@($allOnnx).Count)" }
+          if (@($allOnnx).Count -ne 4) { throw "Expected 4 separately bundled weights (2 legacy + 2 original), got $(@($allOnnx).Count)" }
           foreach ($file in $allOnnx) {
             if ($file.Name -match '(?i)medium') { throw 'Medium OCR model must not ship' }
           }
