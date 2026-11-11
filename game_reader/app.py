@@ -662,6 +662,7 @@ class ReaderApp:
             return
         self._region_border_visible = not self._region_border_visible
         self.update_scan_frame()
+        self.ocr_worker.do_async("request_border", self._region_border_visible)
         self.status("区域框已显示。" if self._region_border_visible else "区域框已隐藏。")
 
     def save_visual_settings(self):
@@ -1488,6 +1489,7 @@ class ReaderApp:
             self._region_invalid_reported = False
             self.settings["fixed_region"] = None
             self.settings["fixed_monitor"] = None
+            self.ocr_worker.do_async("request_clear")
             if getattr(self, "fixed_frame", None) is not None:
                 self.fixed_frame.hide()
             if getattr(self, "region_preview_var", None) is not None:
@@ -1654,6 +1656,21 @@ class ReaderApp:
                     elif generation == self.mode_generation and self.mouse_mode == "hover":
                         self.last_ocr_error = detail
                         self.status("局部 OCR 失败。点击「复制失败诊断」查看。")
+                elif kind == "luna_original_text":
+                    # Emitted by the ORIGINAL OCR pipeline's textoutputer;
+                    # no BlueStar screenshot or OCR worker participates.
+                    if self.mouse_mode != "region":
+                        continue
+                    raw = event[1]
+                    spoken = filter_speech_text(raw, self.settings)
+                    normalized = normalized_text(spoken)
+                    if normalized and normalized != self._region_last_text:
+                        self._region_last_text = normalized
+                        self.update_output(raw)
+                        self.speak_selected(spoken[:1900])
+                        self.status("Luna 完整原版 OCR 已朗读新文字。")
+                elif kind == "luna_bridge_error":
+                    self.status("原版 Luna OCR 连接提示：" + event[1])
                 elif kind == "voices":
                     _, voices, packages, natural_count, has_config = event
                     self.voices = voices
