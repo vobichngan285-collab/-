@@ -197,8 +197,21 @@ class ReaderApp:
         self.create_widgets()
         self.enable_accessibility()
         self.scan_voices()
+        # One-time background ONNX session creation avoids a cold-model pause
+        # when switching modes later. OCR calls still use the same lock.
+        self.root.after(100, self._prepare_ocr_once)
         self.root.after(15, self.poll_input)
         self.root.after(15, self.poll_messages)
+
+    def _prepare_ocr_once(self):
+        def worker():
+            try:
+                with self._ocr_lock:
+                    self.ocr_worker.prepare("small")
+            except Exception as exc:
+                self.events.put(("ocr_preload_error", type(exc).__name__))
+        threading.Thread(target=worker, daemon=True,
+                         name="OneTimeSmallModelPrepare").start()
 
     def create_widgets(self):
         """Large-print, native-widget settings UI.
@@ -1751,6 +1764,8 @@ class ReaderApp:
                             self.voice_note.set("未发现系统自然语音包；其它系统音色仍可使用。")
                     else:
                         self.voice_var.set("未找到可调用的本地语音")
+                elif kind == "ocr_preload_error":
+                    self.status("OCR 预加载未完成，首次识别将正常加载：" + event[1])
                 elif kind == "tts_timing":
                     self.last_voice_timing = event[1]
                     self.status("语音速度诊断：" + event[1])
