@@ -134,6 +134,8 @@ jobs:
           if (-not (Test-Path (Join-Path $pluginFolder 'websocket.py'))) {
             throw "Official original textoutput plugin folder was not found: $pluginFolder"
           }
+          python -m py_compile 'experiments/luna_original_full/bluestar_outputer.py'
+          if ($LASTEXITCODE -ne 0) { throw 'Luna control bridge failed Python syntax check' }
           Copy-Item 'experiments/luna_original_full/bluestar_outputer.py' (Join-Path $pluginFolder 'bluestar.py') -Force
           $configDir = Join-Path $target 'userconfig_bluestar'
           New-Item -ItemType Directory $configDir -Force | Out-Null
@@ -165,27 +167,42 @@ jobs:
           try {
             @'
           import socket, json, time
-          deadline = time.monotonic() + 25
-          while time.monotonic() < deadline:
-              try:
-                  with socket.create_connection(("127.0.0.1", 29380), timeout=1) as s:
-                      s.settimeout(2)
-                      s.sendall(b'{"action":"ping"}\n')
-                      response = b''
-                      while b'\n' not in response:
-                          chunk = s.recv(4096)
-                          if not chunk:
-                              break
-                          response += chunk
-                      data = json.loads(response.split(b'\n')[0].decode())
-                      assert data.get("ok"), data
-                      assert "original" in data.get("implementation","").lower(), data
-                      print("PASS actual original Luna OCR GUI + local-only adapter:", data)
-                      break
-              except (OSError, ValueError, AssertionError) as exc:
-                  time.sleep(0.2)
-          else:
-              raise RuntimeError("Full original Luna GUI IPC did not initialize")
+          def request(action, **kwargs):
+              data = json.dumps(dict(action=action, **kwargs),
+                                ensure_ascii=False).encode('utf-8') + b'\n'
+              deadline = time.monotonic()+30
+              while time.monotonic() < deadline:
+                  try:
+                      with socket.create_connection(('127.0.0.1',29380),timeout=1.4) as sock:
+                          sock.settimeout(18)
+                          sock.sendall(data)
+                          reply = bytearray()
+                          while b'\n' not in reply and len(reply)<2_000_000:
+                              chunk=sock.recv(4096)
+                              if not chunk:
+                                  break
+                              reply.extend(chunk)
+                          if b'\n' not in reply:
+                              raise ValueError('Truncated original OCR reply')
+                          return json.loads(bytes(reply).split(b'\n')[0].decode('utf8'))
+                  except (ConnectionRefusedError,ConnectionResetError,OSError):
+                      time.sleep(0.25)
+              raise RuntimeError('Official Luna IPC not responding: '+action)
+          assert request('ping')['ok']
+          print('PASS complete original Luna GUI and IPC')
+          for action,kwargs in [
+              ('pause',{}),
+              ('region',{'box':[100,80,410,240]}),
+              ('border',{'visible':False}),
+              ('clear',{})]:
+              response=request(action,**kwargs)
+              assert response.get('ok'), ('Original native Qt control FAILED',action,response)
+              print('PASS original Luna Qt region API:',action)
+          response=request('ocr',box=[80,80,400,280])
+          assert response.get('ok'), ('Original Luna native OCR FAILED',response)
+          assert isinstance(response.get('result'),dict), response
+          assert isinstance(response['result'].get('results'),list), response
+          print('PASS full original screenshot + actual ONNX OCR output',len(response['result']['results']))
           '@ | python -
             if ($LASTEXITCODE -ne 0) { throw "Original complete OCR process failed IPC launch" }
           } finally {
@@ -394,14 +411,14 @@ jobs:
             }
             Write-Output "PASS ZIP extraction and all $count entry reads"
           } finally { $archive.Dispose() }
-          $out = 'release/BlueStarOCR_FullOriginalLunaIntegrated_Windows_x64.zip'
+          $out = 'release/BlueStarOCR_LunaFullOriginalQtFix_Windows_x64.zip'
           Copy-Item $original $out
-          git archive --format=zip --output='release/BlueStarOCR_FullOriginalLunaIntegrated_Source.zip' HEAD
+          git archive --format=zip --output='release/BlueStarOCR_LunaFullOriginalQtFix_Source.zip' HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Source archive failed' }
-          foreach ($file in @($out, 'release/BlueStarOCR_FullOriginalLunaIntegrated_Source.zip')) {
+          foreach ($file in @($out, 'release/BlueStarOCR_LunaFullOriginalQtFix_Source.zip')) {
             Write-Output "$file SHA256=$((Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()) size=$((Get-Item $file).Length)"
           }
-          $tag = 'win-full-original-luna-integrated-20261112'
+          $tag = 'win-full-original-luna-qtfix-20261112'
           $notes = @"
           Experimental GameTextReader plus FULL original LunaTranslator v12.1.3.9 OCR runtime.
           Based on November 11 previously functional BlueStar Windows UI and the one-line F7 fix.
@@ -419,7 +436,7 @@ jobs:
           running while BlueStar uses its OCR. F11 passes selection to original Luna.
           Never overwrite older known-working installations or private TTS configs.
           "@
-          gh release create $tag $out 'release/BlueStarOCR_FullOriginalLunaIntegrated_Source.zip' --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --prerelease --title 'Blue Star OCR - FULL ORIGINAL Luna backend integrated (experimental)'  --notes $notes
+          gh release create $tag $out 'release/BlueStarOCR_LunaFullOriginalQtFix_Source.zip' --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --prerelease --title 'Blue Star OCR - FULL Original Luna backend verified Qt IPC (experimental)'  --notes $notes
           if ($LASTEXITCODE -ne 0) { throw 'Release publishing failed' }
           gh release view $tag --repo $env:GITHUB_REPOSITORY --json isDraft,isPrerelease,assets,url
           if ($LASTEXITCODE -ne 0) { throw 'Release verification failed' }
