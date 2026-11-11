@@ -74,3 +74,21 @@ def test_original_plugin_must_not_implement_ocr_algorithms():
     assert not any(term in text for term in (
         "RapidOCR(", "ImageGrab.grab", "cv2.", "OcrDetect(", "BitBlt("
     ))
+
+
+def test_original_hud_does_not_reappear_when_f7_shows_blue_star_frame():
+    """Only original UI/Qt bridges change; original OCR algorithms are untouched."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    plugin = (root / "experiments/luna_original_full/bluestar_outputer.py").read_text(encoding="utf-8")
+    workflow = (root / ".github/workflows/build-windows-luna-original.yml").read_text(encoding="utf-8")
+    assert 'source.showhiderangeui(False)' in plugin
+    assert 'ui.hide_()' in plugin
+    assert 'source.showhiderangeui(bool(payload["visible"]))' not in plugin
+    assert "$defaults['startupautohide'] = $true" in workflow
+    assert "$defaults['ocr_auto_method_v2'] = 'period'" in workflow
+    assert "$defaults['ocr_interval'] = 0.3" in workflow
+    assert "$defaults['ocr_translation_overlay'] = $false" in workflow
+    # Do not change the author's expensive GDI/similarity/inference source.
+    assert "from textio.textsource.ocrtext import imageCutEx" in plugin
+    assert "from myutils.ocrutil import ocr_run" in plugin
