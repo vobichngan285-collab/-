@@ -44,7 +44,27 @@ class _ChangeRegion:
                     import gobject
                     from qtsymbols import QRect
                     action = payload["action"]
-                    if action == "region":
+                    if action == "status":
+                        from myutils.config import globalconfig
+                        ui = getattr(gobject.base, "translation_ui", None)
+                        source = getattr(gobject.base, "textsource", None)
+                        payload["details"] = {
+                            "strategy": globalconfig.get("ocr_auto_method_v2", "period"),
+                            "interval_s": globalconfig.get("ocr_interval", 1.5),
+                            "main_window_hidden": bool(ui and ui.isHidden()),
+                            "source": type(source).__name__ if source is not None else None,
+                            "original_region_count": len(getattr(source, "ranges", [])),
+                            "original_regions_hidden": all(
+                                r.range_ui.isHidden() for r in getattr(source, "ranges", [])
+                            ),
+                        }
+                        payload["ok"] = True
+                    elif action == "hide_ui":
+                        ui = getattr(gobject.base, "translation_ui", None)
+                        if ui is not None:
+                            ui.hide_()  # The author's original hide API, no Qt rewrite.
+                        payload["ok"] = True
+                    elif action == "region":
                         # ORIGINAL ocrtext setup, capture, scheduling and OCR.
                         from textio.textsource.ocrtext import ocrtext
                         if not isinstance(gobject.base.textsource, ocrtext):
@@ -56,6 +76,9 @@ class _ChangeRegion:
                         source.clearrange()
                         source.newrangeadjustor()
                         source.setrect(QRect(left, top, right-left, bottom-top))
+                        # BlueStar already draws its F7-controlled region outline.
+                        # The author's region still scans when its Qt window is hidden.
+                        source.showhiderangeui(False)
                         payload["ok"] = True
                     elif action == "clear":
                         source = gobject.base.textsource
@@ -75,10 +98,19 @@ class _ChangeRegion:
                     elif action == "border":
                         source = gobject.base.textsource
                         if source is not None and hasattr(source, "showhiderangeui"):
-                            source.showhiderangeui(bool(payload["visible"]))
+                            # The app's own F7 controls the ONLY visible border.
+                            # Never resurrect a second original Luna region frame.
+                            source.showhiderangeui(False)
                         payload["ok"] = True
                     else:
                         raise ValueError("Unknown action")
+                    # Keep the FULL original OCR program running without its
+                    # duplicate pink toolbar/translation panel over the game.
+                    # This calls the author's unmodified UI hide method.
+                    if action in ("region", "pause", "resume", "border", "clear"):
+                        ui = getattr(gobject.base, "translation_ui", None)
+                        if ui is not None and not ui.isHidden():
+                            ui.hide_()
                 except Exception as exc:
                     payload["error"] = type(exc).__name__ + ": " + str(exc)[:260]
                 finally:
@@ -102,6 +134,8 @@ class _ChangeRegion:
             raise TimeoutError("Luna original Qt UI did not answer")
         if payload.get("error"):
             raise RuntimeError(payload["error"])
+        if action == "status":
+            return payload.get("details", {})
         return bool(payload.get("ok"))
 
 
@@ -168,14 +202,16 @@ class Outputer(Base):
                         raise RuntimeError("Original Luna imageCutEx returned empty image")
                     parsed = ocr_run(image)
                     result = {"ok": not bool(parsed.error), "result": parsed.json}
-                elif action in ("region", "clear", "pause", "resume", "border"):
+                elif action in ("region", "clear", "pause", "resume", "border", "hide_ui", "status"):
                     if action == "region":
                         kw = {"box": _bounded_region(request.get("box"))}
                     elif action == "border":
                         kw = {"visible": bool(request.get("visible"))}
                     else:
                         kw = {}
-                    result = {"ok": self._dispatcher.request(action, **kw)}
+                    data = self._dispatcher.request(action, **kw)
+                    result = ({"ok": True, "status": data}
+                              if action == "status" else {"ok": bool(data)})
                 else:
                     raise ValueError("Unsupported control action")
             except Exception as exc:
