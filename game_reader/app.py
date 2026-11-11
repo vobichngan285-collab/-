@@ -162,7 +162,7 @@ class ReaderApp:
         self._region_prev_lines = []
         self._region_invalid_reported = False
         self._region_last_window = None
-        self._region_border_visible = True
+        self._region_border_visible = bool(self.settings.get("show_scan_frame", True))
         self._region_force_initial = False
         self.hover_ocr_busy = False
         self._hover_last_text = ""
@@ -1035,7 +1035,7 @@ class ReaderApp:
             self._region_last_fingerprint = None
             self._region_last_text = ""
             self._region_prev_lines = []
-            self._region_border_visible = bool(self.settings.get("show_scan_frame", True))
+            # F11 changes the region, never reverses a manual F7 hide.
             self.region_preview_var.set(self.format_fixed_region())
             self.persist()
             # The app must not cover the selected game pixels after F11.
@@ -1106,12 +1106,26 @@ class ReaderApp:
         if self.mouse_mode == desired:
             return
         self.mouse_mode = desired
+        # Immediately invalidate old screenshot, OCR and speech deliveries;
+        # native ONNX work already running safely finishes without speaking.
+        self.capture_id += 1
         self.mode_generation += 1
         self._region_job_id = getattr(self, "_region_job_id", 0) + 1
-        self.region_ocr_busy = False  # Stale jobs are ignored by job ID.
+        self.busy = False
+        self.region_ocr_busy = False
+        self.hover_ocr_busy = False
+        self.pending_full_capture = False
+        self._pending_full_trigger_at = None
+        self.lines = []
+        self.expires_at = None
+        self._full_capture_window = None
+        if hasattr(self, "read_btn"):
+            self.read_btn.configure(state="normal")
+        self.update_output("")
         self._region_last_fingerprint = None
         self._region_last_text = ""
         self._region_prev_lines = []
+        self._region_force_initial = False
         self._region_next_due = float("inf")
         self._hover_last_text = ""
         self._hover_spoken_cursor = None
@@ -1139,8 +1153,9 @@ class ReaderApp:
                 self.speak_selected("鼠标跟随模式")
         elif desired == "region":
             self.mouse_mode_var.set("当前：区域跟踪模式")
-            self._region_border_visible = bool(self.settings.get("show_scan_frame", True))
-            self._region_next_due = time.monotonic() + 0.18
+            # Preserve the user's F7 choice; inspect the first frame at once.
+            self._region_force_initial = True
+            self._region_next_due = time.monotonic()
             if self.root.state() == "normal":
                 self.root.iconify()
             box = parse_fixed_region(self.settings.get("fixed_region"),
@@ -1149,8 +1164,8 @@ class ReaderApp:
                         else "区域跟踪未设定范围，按 F11 框选。")
             if announce:
                 self.speak_selected("区域跟踪")
-            # Prompt announcement is not allowed to hold back a new F11 capture.
-            self._mode_announcement_until = time.monotonic() + 0.25
+            # Mode voice hint must not block the first screenshot.
+            self._mode_announcement_until = 0.0
         else:
             self.mouse_mode_var.set("当前：默认模式（全屏 OCR 指向朗读）")
             self._hover_next_due = float("inf")
@@ -1302,6 +1317,8 @@ class ReaderApp:
         start_focus = self._game_capture_target() or foreground_window_id()
 
         def work():
+            if generation != self.mode_generation or job != self._region_job_id:
+                return
             started = time.monotonic()
             try:
                 if snapshot is not None:
@@ -1321,6 +1338,8 @@ class ReaderApp:
                                      capture_ms, start_focus, (capture_ms, 0), force))
                     return
                 with self._ocr_lock:
+                    if generation != self.mode_generation or job != self._region_job_id:
+                        return
                     lines = self.ocr_worker.recognize(image, box[:2], "small")
                 infer_ms = round((time.monotonic() - started) * 1000) - capture_ms
                 self.events.put(("region_ok", generation, job, lines, sig,
@@ -1367,7 +1386,7 @@ class ReaderApp:
         if not normalized:
             if previous_text:
                 self.speech.stop()
-            self.update_output(raw)
+            self.update_output("")
             return
         if is_repeat_speech(previous_text, normalized, self.settings):
             return
@@ -1376,6 +1395,9 @@ class ReaderApp:
         if not additions:
             return
         self.speak_selected("\n".join(additions)[:1900])
+        # Audio owns its queued request. Keep only dedup state, not the
+        # full recognized passage in the hidden application's output.
+        self.update_output("")
         self.status(f"区域跟踪：检测到新文字，截图 {timings[0]} 毫秒，"
                     f"OCR {timings[1]} 毫秒。")
 
@@ -1413,6 +1435,8 @@ class ReaderApp:
         self._hover_next_due = time.monotonic() + self.settings["period_ms"] / 1000.0
 
         def work():
+            if generation != self.mode_generation or self.mouse_mode != "hover":
+                return
             started = time.monotonic()
             try:
                 image = (grab_game_rect(box, game_hwnd)
@@ -1421,6 +1445,8 @@ class ReaderApp:
                 if image.size != (box[2] - box[0], box[3] - box[1]):
                     raise RuntimeError("局部截图尺寸与显示器范围不一致")
                 with self._ocr_lock:
+                    if generation != self.mode_generation or self.mouse_mode != "hover":
+                        return
                     lines = self.ocr_worker.recognize(image, box[:2], "small")
                 infer_ms = round((time.monotonic() - started) * 1000) - capture_ms
                 self.events.put(("hover_ok", generation, lines, manual,
@@ -1884,7 +1910,9 @@ class ReaderApp:
                 if (not self.busy and not self.region_ocr_busy
                         and time.monotonic() >= self._region_next_due
                         and time.monotonic() >= self._mode_announcement_until):
-                    self.start_region_scan()
+                    first = getattr(self, "_region_force_initial", False)
+                    if self.start_region_scan(force=first):
+                        self._region_force_initial = False
         except Exception as exc:
             self.status("鼠标／快捷键监听异常：" + str(exc))
         self.root.after(15, self.poll_input)
