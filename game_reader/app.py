@@ -1121,7 +1121,7 @@ class ReaderApp:
         self.mouse_mode = desired
         # Immediately invalidate old screenshot, OCR and speech deliveries;
         # native ONNX work already running safely finishes without speaking.
-        self.capture_id += 1
+        self.capture_id = getattr(self, "capture_id", 0) + 1
         self.mode_generation += 1
         self._region_job_id = getattr(self, "_region_job_id", 0) + 1
         self.busy = False
