@@ -183,50 +183,32 @@ def test_region_f11_persists_absolute_box_without_touching_mouse_relative():
     assert fired and fired[0]["force"] is True
 
 
-def test_no_overlapping_region_ocr_and_period_or_change_strategy(monkeypatch):
+def test_original_luna_owns_region_capture_analysis_timing_and_ocr(monkeypatch):
+    """No BlueStar screen grabs/OCR threads may run in upstream region mode."""
     import game_reader.app as module
-    grabbed = Image.new("RGB", (190,90), "#203344")
-    monkeypatch.setattr(module, "grab_game_rect", lambda box, hwnd=None: grabbed.copy())
-    monkeypatch.setattr(module, "foreground_window_id", lambda:42)
-    app=ReaderApp.__new__(ReaderApp)
-    app.closed=False
-    app._choosing_region=False
-    app.setting_hotkey=False
-    app.mouse_mode="region"
-    app.busy=False
-    app.region_ocr_busy=False
-    app.hover_ocr_busy=False
-    app.pending_full_capture=False
-    app.root=SimpleNamespace(state=lambda:"iconic")
-    app.mode_generation=4
-    app._region_job_id=0
-    app._region_last_fingerprint=None
-    app._region_next_due=0
-    app._region_invalid_reported=False
-    app._ocr_lock=Lock()
-    app.events=Queue()
-    app._fixed_region_box=lambda:(10,10,200,100)
-    app.settings={"fixed_monitor":[0,0,320,200],
-                  "region_strategy":"change","region_period_ms":100}
-    calls=[]
-    app.ocr_worker=SimpleNamespace(recognize=lambda image, origin, tier:
-                                   calls.append((image.size,origin,tier)) or [])
+    app = ReaderApp.__new__(ReaderApp)
+    app.closed = False
+    app._choosing_region = False
+    app.setting_hotkey = False
+    app.mouse_mode = "region"
+    app.root = SimpleNamespace(state=lambda: "iconic")
+    app._region_job_id = 0
+    app._region_border_visible = False
+    app._region_next_due = 0
+    app._fixed_region_box = lambda: (10, 10, 200, 100)
+    requests = []
+    app.ocr_worker = SimpleNamespace(
+        do_async=lambda method, *values: requests.append((method, values))
+    )
+    monkeypatch.setattr(module, "grab_game_rect",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("BlueStar capture forbidden")))
     assert app.start_region_scan(force=True)
-    assert not app.start_region_scan()  # In-flight capture cannot overlap.
-    e=app.events.get(timeout=2)
-    assert e[0]=="region_ok" and e[3]==[]
-    app.region_ocr_busy=False
-    app._region_last_fingerprint=e[4]
-    assert app.start_region_scan()
-    e2=app.events.get(timeout=2)
-    assert e2[3] is None
-    assert calls==[((190,90),(10,10),"small")]
-    app.region_ocr_busy=False
-    app.settings["region_strategy"]="period"
-    assert app.start_region_scan()
-    e3=app.events.get(timeout=2)
-    assert e3[3]==[]
-    assert len(calls)==2
+    assert requests == [("request_region", ((10, 10, 200, 100), False))]
+    assert app._region_next_due == float("inf")
+    assert app._region_job_id == 1
+    # The original program scans in its own process; no followup screenshot.
+    assert requests == [("request_region", ((10, 10, 200, 100), False))]
+
 
 
 def test_manual_clear_preserves_region_dedup_but_erases_visible_results():
