@@ -7,7 +7,7 @@ and converts upstream OCR box coordinates into our existing OCRLine UI type.
 """
 from __future__ import annotations
 import json
-import os
+from queue import Queue
 from pathlib import Path
 import socket
 import subprocess
@@ -66,6 +66,9 @@ class LunaOriginalOCR:
         self.proc = None
         self._stop = threading.Event()
         self._udp = None
+        self._controls = Queue()
+        threading.Thread(target=self._control_loop, daemon=True,
+                         name="OriginalLunaSerializedControls").start()
         self.last_preprocess_ms = 0
         self.last_engine_ms = 0
         if event_sink is not None:
@@ -156,8 +159,11 @@ class LunaOriginalOCR:
         reply = self._call("ocr", box=[left, top, right, bottom], timeout=25)
         return _convert_original_boxes(reply.get("result", {}), (left, top, right, bottom))
 
-    def request_region(self, box):
-        return self._call("region", box=list(map(int, box)), timeout=15)
+    def request_region(self, box, visible=True):
+        result = self._call("region", box=list(map(int, box)), timeout=15)
+        self.request_border(visible)
+        self.request_resume()
+        return result
 
     def request_clear(self):
         return self._call("clear", timeout=8)
@@ -171,18 +177,26 @@ class LunaOriginalOCR:
     def request_border(self, visible):
         return self._call("border", visible=bool(visible), timeout=8)
 
-    def do_async(self, operation, *values):
-        def work():
+    def _control_loop(self):
+        while not self._stop.is_set():
+            task = self._controls.get()
+            if task is None:
+                return
+            method, values = task
             try:
-                getattr(self, operation)(*values)
+                getattr(self, method)(*values)
             except Exception as exc:
                 if self.events is not None:
                     self.events.put(("luna_bridge_error", str(exc)[:220]))
-        threading.Thread(target=work, daemon=True,
-                         name="OriginalLunaControl").start()
+
+    def do_async(self, operation, *values):
+        # Original Qt commands must preserve user-entered order across modes.
+        if not self._stop.is_set():
+            self._controls.put((operation, values))
 
     def close(self):
         self._stop.set()
+        self._controls.put(None)
         if self._udp is not None:
             try:
                 self._udp.close()
