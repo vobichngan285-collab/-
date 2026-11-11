@@ -1148,11 +1148,11 @@ class ReaderApp:
                                      self.settings.get("fixed_monitor"))
             self.status("已进入原版 Luna 区域模式。" if box is not None
                         else "请按 F11 框选原版 Luna 区域。")
-            if box is not None:
-                self.start_region_scan()
-            else:
-                engine = getattr(self, "ocr_worker", None)
-                if engine is not None:
+            engine = getattr(self, "ocr_worker", None)
+            if engine is not None:
+                if box is not None:
+                    self.start_region_scan()
+                else:
                     engine.do_async("request_pause")
             if announce:
                 self.speak_selected("区域跟踪")
