@@ -1139,7 +1139,6 @@ class ReaderApp:
                 self.speak_selected("鼠标跟随模式")
         elif desired == "region":
             self.mouse_mode_var.set("当前：区域跟踪模式")
-            self._region_border_visible = bool(self.settings.get("show_scan_frame", True))
             self._region_next_due = time.monotonic() + 0.18
             if self.root.state() == "normal":
                 self.root.iconify()
