@@ -128,10 +128,8 @@ def test_desktop_relative_crop_scans_even_when_progman_is_foreground(monkeypatch
     seen = {}
 
     class OCR:
-        def recognize(self, img, origin, tier):
-            seen["origin"] = origin
-            seen["size"] = img.size
-            seen["model"] = tier
+        def recognize_box(self, box):
+            seen["box"] = tuple(box)
             return [OCRLine("DLSS", 790, 730, 865, 760)]
 
     app.ocr_worker = OCR()
@@ -140,20 +138,13 @@ def test_desktop_relative_crop_scans_even_when_progman_is_foreground(monkeypatch
     monkeypatch.setattr(mod, "foreground_class", lambda: "Progman")
     monkeypatch.setattr(mod, "monitor_rect_at_cursor",
                         lambda: (0, 0, 1920, 1080))
-    def grab(*, bbox, all_screens):
-        seen["box"] = bbox
-        assert all_screens
-        return Image.new("RGB", (bbox[2]-bbox[0], bbox[3]-bbox[1]))
-    monkeypatch.setattr(mod.ImageGrab, "grab", grab)
+    def prohibit_grab(*a, **k):
+        raise AssertionError("BlueStar must NOT capture images in Luna original mode")
+    monkeypatch.setattr(mod.ImageGrab, "grab", prohibit_grab)
     monkeypatch.setattr(threading, "Thread", MockThread)
 
     assert app.start_hover_ocr(False)
-    assert seen == {
-        "origin": (740, 680),
-        "size": (600, 400),
-        "model": "small",
-        "box": (740, 680, 1340, 1080),
-    }
+    assert seen == {"box": (740, 680, 1340, 1080)}
     event = app.events.get_nowait()
     assert event[0] == "hover_ok"
     assert event[5:7] == ((540, 500), "Progman")
