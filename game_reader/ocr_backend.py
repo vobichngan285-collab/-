@@ -52,7 +52,8 @@ class LocalOCR:
         self.last_preprocess_ms = 0
         self.last_engine_ms = 0
 
-    def recognize(self, image, origin: tuple[int, int], tier: str) -> list[OCRLine]:
+    def prepare(self, tier: str = "small") -> None:
+        """Load existing official ONNX model once, without consuming a screenshot."""
         if tier not in TIERS:
             raise ValueError("Unsupported OCR tier")
         if tier != self.loaded_tier:
@@ -72,6 +73,9 @@ class LocalOCR:
                 "Rec.model_path": str(rec),
             })
             self.loaded_tier = tier
+
+    def recognize(self, image, origin: tuple[int, int], tier: str) -> list[OCRLine]:
+        self.prepare(tier)
         t0 = time.monotonic()
         # ImageGrab/GDI already return RGB; avoid an unnecessary full-frame copy.
         pixels = np.asarray(image if image.mode == "RGB" else image.convert("RGB"))
