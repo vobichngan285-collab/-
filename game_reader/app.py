@@ -19,9 +19,10 @@ from tkinter import ttk, filedialog
 from PIL import ImageGrab
 
 from .core import HoverTracker, OCRLine, hit_test, build_reading_regions
-from .ocr_backend import LocalOCR
+from .luna_original_bridge import LunaOriginalOCR
 from .win_screen import (enable_dpi_awareness, get_cursor, is_key_down,
                          grab_current_monitor, grab_game_rect,
+                         game_client_rect, intersect_rect,
                          monitor_rect_at_cursor, monitor_rect_at_point)
 from .speech import SpeechWorker, enumerate_sapi_voices
 from .voice_info import preferred_voice_index, narrator_package_names, voice_diagnostic
@@ -135,7 +136,9 @@ class ReaderApp:
         self.lines: list[OCRLine] = []
         self._full_capture_window = None
         self._game_window = GameWindowBinding()
-        self.ocr_worker = LocalOCR()
+        # All OCR core operations are delegated to the ORIGINAL Luna process.
+        # This interface only transports coordinates and resulting text boxes.
+        self.ocr_worker = LunaOriginalOCR(self.events)
         self.busy = False
         self.closed = False
         self.capture_id = 0
@@ -176,7 +179,7 @@ class ReaderApp:
         self._picker_monitor = None
         self._picker_snapshot = None
         self._picker_foreground = None
-        self._ocr_lock = threading.Lock()  # Never run concurrent work in RapidOCR.
+        self._ocr_lock = threading.Lock()  # Serialize one-shot requests to upstream.
         self._hover_spoken_cursor = None
         self._hover_spoken_foreground = None
         self.last_voice_timing = "尚未测量"
@@ -1075,19 +1078,11 @@ class ReaderApp:
         def work():
             started = time.monotonic()
             try:
-                if snapshot is not None:
-                    ml, mt = monitor[:2]
-                    image = snapshot.crop((box[0]-ml, box[1]-mt,
-                                           box[2]-ml, box[3]-mt))
-                else:
-                    image = (grab_game_rect(box, focus)
-                             if focus else grab_game_rect(box))
-                capture_ms = round((time.monotonic() - started) * 1000)
-                if image.size != (box[2]-box[0], box[3]-box[1]):
-                    raise RuntimeError("框选截图尺寸与实际识别区域不一致")
+                # The author's original imageCutEx() does the capture itself.
+                capture_ms = 0
                 with self._ocr_lock:
-                    lines = self.ocr_worker.recognize(image, box[:2], "small")
-                infer_ms = round((time.monotonic() - started) * 1000) - capture_ms
+                    lines = self.ocr_worker.recognize_box(box)
+                infer_ms = round((time.monotonic() - started) * 1000)
                 self.events.put(("ocr_ok", request_id, lines,
                                  round((time.monotonic() - started) * 1000),
                                  focus, "selection", (capture_ms, infer_ms)))
@@ -1127,6 +1122,8 @@ class ReaderApp:
             self.fixed_frame.hide()
         announce = bool(self.settings.get("mode_voice_hint", True))
         self._mode_announcement_until = time.monotonic() + (1.6 if announce else 0)
+        if desired != "region":
+            self.ocr_worker.do_async("request_pause")
         if desired == "hover":
             self._hover_scan_paused = False
             self.mouse_mode_var.set("当前：鼠标跟随模式（局部 OCR）")
@@ -1138,14 +1135,18 @@ class ReaderApp:
             if announce:
                 self.speak_selected("鼠标跟随模式")
         elif desired == "region":
-            self.mouse_mode_var.set("当前：区域跟踪模式")
-            self._region_next_due = time.monotonic() + 0.18
+            self.mouse_mode_var.set("当前：Luna 原版区域跟踪模式")
+            self._region_next_due = float("inf")
             if self.root.state() == "normal":
                 self.root.iconify()
             box = parse_fixed_region(self.settings.get("fixed_region"),
                                      self.settings.get("fixed_monitor"))
-            self.status("已恢复固定区域，开始跟踪。" if box is not None
-                        else "区域跟踪未设定范围，按 F11 框选。")
+            self.status("已进入原版 Luna 区域模式。" if box is not None
+                        else "请按 F11 框选原版 Luna 区域。")
+            if box is not None:
+                self.start_region_scan()
+            else:
+                self.ocr_worker.do_async("request_pause")
             if announce:
                 self.speak_selected("区域跟踪")
             # Prompt announcement is not allowed to hold back a new F11 capture.
@@ -1266,70 +1267,23 @@ class ReaderApp:
         return box if region_on_same_monitor(box, monitor, live) else None
 
     def start_region_scan(self, force: bool = False, snapshot=None):
-        """One fixed-position screenshot, optional cheap change gate, then Small.
+        """Configure ORIGINAL Luna ocrtext scan once. NO BlueStar scan loop.
 
-        Never run overlapping OCR instances and never impose a delay on F8/F11.
-        A completed old-mode worker can finish but cannot deliver stale speech.
+        Original source owns capture, timer, image similarity, engine,
+        throttling and text dedup. The normal 15ms UI poll never takes frames.
         """
         if (self.closed or self._choosing_region or self.mouse_mode != "region"
-                or self.setting_hotkey or self.busy or self.region_ocr_busy
-                or self.hover_ocr_busy or self.pending_full_capture):
-            return False
-        if self.root.state() == "normal":
+                or self.setting_hotkey):
             return False
         box = self._fixed_region_box()
         if box is None:
-            self._region_next_due = (float("inf") if self.settings.get("fixed_region") is None
-                                     else time.monotonic() + 1.0)
-            if not self._region_invalid_reported and self.settings.get("fixed_region") is not None:
-                self.status("固定区域的显示器或分辨率已变化，请按 F11 重新框选。")
-                self._region_invalid_reported = True
-            if self.fixed_frame is not None:
-                self.fixed_frame.hide()
+            self.status("请按 F11 选择原版 Luna OCR 扫描区域。")
             return False
-        self._region_invalid_reported = False
-        monitor = parse_monitor(self.settings["fixed_monitor"])
-        strategy = parse_strategy(self.settings["region_strategy"])
-        period = (self.settings["region_period_ms"] if strategy == "period"
-                  else 300)
-        self._region_next_due = time.monotonic() + period / 1000.0
-        old_signature = self._region_last_fingerprint
-        generation = self.mode_generation
-        self._region_job_id += 1
-        job = self._region_job_id
-        self.region_ocr_busy = True
-        start_focus = self._game_capture_target() or foreground_window_id()
-
-        def work():
-            started = time.monotonic()
-            try:
-                if snapshot is not None:
-                    ml, mt = monitor[:2]
-                    image = snapshot.crop((box[0] - ml, box[1] - mt,
-                                           box[2] - ml, box[3] - mt))
-                else:
-                    image = (grab_game_rect(box, start_focus)
-                             if start_focus else grab_game_rect(box))
-                if image.size != (box[2] - box[0], box[3] - box[1]):
-                    raise RuntimeError("固定区域截图尺寸不匹配")
-                sig = screenshot_fingerprint(image)
-                capture_ms = round((time.monotonic() - started) * 1000)
-                if strategy == "change" and not force and not frame_has_changed(old_signature, sig):
-                    # No OCR necessary, but update the small grayscale baseline.
-                    self.events.put(("region_ok", generation, job, None, sig,
-                                     capture_ms, start_focus, (capture_ms, 0), force))
-                    return
-                with self._ocr_lock:
-                    lines = self.ocr_worker.recognize(image, box[:2], "small")
-                infer_ms = round((time.monotonic() - started) * 1000) - capture_ms
-                self.events.put(("region_ok", generation, job, lines, sig,
-                                 round((time.monotonic() - started) * 1000),
-                                 start_focus, (capture_ms, infer_ms), force))
-            except Exception:
-                self.events.put(("region_fail", generation, job,
-                                 traceback.format_exc()))
-        threading.Thread(target=work, daemon=True,
-                         name="FixedRegionSmallOCR").start()
+        self._region_job_id = getattr(self, "_region_job_id", 0) + 1
+        self._region_next_due = float("inf")
+        self.ocr_worker.do_async("request_region", box)
+        self.ocr_worker.do_async("request_resume")
+        self.status("原版 Luna 连续 OCR 已接管区域截图和识别，不运行蓝星扫描线程。")
         return True
 
     def _handle_region_result(self, generation, job, lines, fingerprint,
@@ -1414,14 +1368,11 @@ class ReaderApp:
         def work():
             started = time.monotonic()
             try:
-                image = (grab_game_rect(box, game_hwnd)
-                         if game_hwnd else grab_game_rect(box))
-                capture_ms = round((time.monotonic() - started) * 1000)
-                if image.size != (box[2] - box[0], box[3] - box[1]):
-                    raise RuntimeError("局部截图尺寸与显示器范围不一致")
+                # Original Luna captures this pointer-centered box; no PIL image.
+                capture_ms = 0
                 with self._ocr_lock:
-                    lines = self.ocr_worker.recognize(image, box[:2], "small")
-                infer_ms = round((time.monotonic() - started) * 1000) - capture_ms
+                    lines = self.ocr_worker.recognize_box(box)
+                infer_ms = round((time.monotonic() - started) * 1000)
                 self.events.put(("hover_ok", generation, lines, manual,
                                  round((time.monotonic() - started) * 1000),
                                  cursor, captured_window, (capture_ms, infer_ms)))
@@ -1576,18 +1527,27 @@ class ReaderApp:
             phase = "截图"
             try:
                 focus = game_hwnd or foreground_window_id()
-                capture_report = {}
-                image, origin = grab_current_monitor(game_hwnd or None, report=capture_report)
-                captured_at = time.monotonic()
-                capture_ms = round((captured_at - started) * 1000)
-                phase = f"离线OCR推理（{tier}）"
+                # Coordinates only. Original author's imageCutEx(None) takes
+                # the game image and ocr_run uses the original model and rules.
+                monitor = monitor_rect_at_cursor()
+                box = monitor
+                if game_hwnd:
+                    client = game_client_rect(game_hwnd)
+                    if client is None:
+                        raise RuntimeError("原游戏窗口已关闭或最小化")
+                    box = intersect_rect(client, monitor)
+                    if box is None:
+                        raise RuntimeError("游戏不在鼠标当前显示器范围内")
+                capture_report = {"method": "luna_full_original_imageCutEx"}
+                capture_ms = 0
+                phase = "Luna 完整原版 OCR"
                 waiting_at = time.monotonic()
                 with self._ocr_lock:
                     lock_ms = round((time.monotonic() - waiting_at) * 1000)
-                    lines = self.ocr_worker.recognize(image, origin, tier)
-                    preprocess_ms = getattr(self.ocr_worker, "last_preprocess_ms", 0)
-                    engine_ms = getattr(self.ocr_worker, "last_engine_ms", 0)
-                infer_ms = round((time.monotonic() - captured_at) * 1000)
+                    lines = self.ocr_worker.recognize_box(box)
+                    preprocess_ms = 0
+                    engine_ms = round((time.monotonic() - waiting_at) * 1000)
+                infer_ms = engine_ms
                 self.events.put(("ocr_ok", capture_id, lines,
                                  round((time.monotonic() - started) * 1000),
                                  focus, "fullscreen", (capture_ms, infer_ms,
@@ -1879,11 +1839,9 @@ class ReaderApp:
                         and time.monotonic() >= self._mode_announcement_until):
                     self.start_hover_ocr(manual=False)
             elif self.mouse_mode == "region":
-                self.update_scan_frame()
-                if (not self.busy and not self.region_ocr_busy
-                        and time.monotonic() >= self._region_next_due
-                        and time.monotonic() >= self._mode_announcement_until):
-                    self.start_region_scan()
+                # Luna's ORIGINAL ocrtext.gettextthread/getresauto() owns the
+                # entire continuous capture/OCR loop; NEVER scan here.
+                pass
         except Exception as exc:
             self.status("鼠标／快捷键监听异常：" + str(exc))
         self.root.after(15, self.poll_input)
@@ -1899,6 +1857,8 @@ class ReaderApp:
             self.wheel_listener.close()
         self.speech.shutdown()
         self.cues.shutdown()
+        if hasattr(self.ocr_worker, "close"):
+            self.ocr_worker.close()
         if getattr(self, "scan_frame", None) is not None:
             self.scan_frame.close()
         if getattr(self, "fixed_frame", None) is not None:
