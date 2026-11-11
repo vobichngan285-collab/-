@@ -2,7 +2,7 @@ name: Build Blue Star OCR fixed-region three-mode experiment
 on:
   workflow_dispatch:
   push:
-    branches: ['exp/v12-clean-blue-a11y-filtered-mouse-20261110', 'feat/windows-v12-cursor-drag-clear-speed-20261110', 'feat/windows-v121-cue-cleanui-voice-latency-20261110', 'exp/windows-fixed-region-tracking-20261110', 'feat/windows-game-capture-mouse-clear-speed-20261110', 'fix/windows-luna-bound-game-window-20261110', 'fix/windows-simple-visible-capture-fast-20261111']
+    branches: ['exp/v12-clean-blue-a11y-filtered-mouse-20261110', 'feat/windows-v12-cursor-drag-clear-speed-20261110', 'feat/windows-v121-cue-cleanui-voice-latency-20261110', 'exp/windows-fixed-region-tracking-20261110', 'feat/windows-game-capture-mouse-clear-speed-20261110', 'fix/windows-luna-bound-game-window-20261110', 'fix/windows-simple-visible-capture-fast-20261111', 'fix/windows-region-instant-clean-20261112']
     paths:
       - 'game_reader/**'
       - 'main.py'
@@ -276,7 +276,7 @@ jobs:
           retention-days: 30
 
       - name: Verify portable ZIP and publish new isolated experimental release
-        if: github.ref_name == 'fix/windows-simple-visible-capture-fast-20261111'
+        if: github.ref_name == 'fix/windows-region-instant-clean-20261112'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -298,27 +298,28 @@ jobs:
             }
             Write-Output "PASS ZIP extraction and all $count entry reads"
           } finally { $archive.Dispose() }
-          $out = 'release/BlueStarOCR_SimpleVisibleCapture_Fast_Windows_x64.zip'
+          $out = 'release/BlueStarOCR_RegionInstantClean_Windows_x64.zip'
           Copy-Item $original $out
-          git archive --format=zip --output='release/BlueStarOCR_SimpleVisibleCapture_Source.zip' HEAD
+          git archive --format=zip --output='release/BlueStarOCR_RegionInstantClean_Source.zip' HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Source archive failed' }
-          foreach ($file in @($out, 'release/BlueStarOCR_SimpleVisibleCapture_Source.zip')) {
+          foreach ($file in @($out, 'release/BlueStarOCR_RegionInstantClean_Source.zip')) {
             Write-Output "$file SHA256=$((Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()) size=$((Get-Item $file).Length)"
           }
-          $tag = 'win-simple-visible-capture-20261111'
+          $tag = 'win-region-instant-clean-20261112'
           $notes = @"
-          Windows 11 x64 GameTextReader: simplified visible desktop capture.
-          This is an experimental user-validation build, not a confirmed 7 Days to Die fix.
-          F8 binds game client coordinates but always reads the currently visible desktop pixels;
-          eliminates GDI window BitBlt from OCR capture paths.
-          Raw V1.2 PP-OCRv6 Small, user natural voices, mouse keys and accessibility preserved.
-          F8 completion sound now queues before result UI rendering; input and result polling shortened.
-          No private voice config or screenshots included; copy your existing config locally if needed.
-          Extract the single ZIP into a NEW folder and run GameTextReader/GameTextReader.exe.
-          Real game menu switching, mouse hit boxes and hardware speech latency need user verification.
-          See the included original LunaTranslator GPLv3 source and separately released project source.
+          Windows 11 x64 GameTextReader - isolated experimental region startup and cleanup fix.
+          F7 border choice persists across mode switches and F11 region selection.
+          Mode switches retire pending OCR/speech jobs and discard older results immediately.
+          First region scan starts without waiting for announcement; 300ms change check unchanged.
+          Small OCR is prepared once in the background; screen-change gate stores only byte signatures.
+          Game pixels, complete images and region passages are not cached after processing.
+          PP-OCRv6 Small models, F8 visible capture, voices, mouse shortcuts and accessibility preserved.
+          Native inference already running is not forcibly killed; real game speed needs user validation.
+          New isolated release; unpack in a new folder, old installs and releases untouched.
+          No private voice configs, screenshots or recognized text included.
+          Original LunaTranslator GPLv3 source and project source provided.
           "@
-          gh release create $tag $out 'release/BlueStarOCR_SimpleVisibleCapture_Source.zip' --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --prerelease --title 'Blue Star OCR - Simple Visible Game Capture (experimental)' --notes $notes
+          gh release create $tag $out 'release/BlueStarOCR_RegionInstantClean_Source.zip' --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --prerelease --title 'Blue Star OCR - Instant Region Tracking and Clean Mode Switch (experimental)' --notes $notes
           if ($LASTEXITCODE -ne 0) { throw 'Release publishing failed' }
           gh release view $tag --repo $env:GITHUB_REPOSITORY --json isDraft,isPrerelease,assets,url
           if ($LASTEXITCODE -ne 0) { throw 'Release verification failed' }
