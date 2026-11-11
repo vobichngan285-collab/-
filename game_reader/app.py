@@ -1282,8 +1282,7 @@ class ReaderApp:
             return False
         self._region_job_id = getattr(self, "_region_job_id", 0) + 1
         self._region_next_due = float("inf")
-        self.ocr_worker.do_async("request_region", box)
-        self.ocr_worker.do_async("request_resume")
+        self.ocr_worker.do_async("request_region", box, self._region_border_visible)
         self.status("原版 Luna 连续 OCR 已接管区域截图和识别，不运行蓝星扫描线程。")
         return True
 
