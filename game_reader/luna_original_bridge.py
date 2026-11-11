@@ -159,6 +159,9 @@ class LunaOriginalOCR:
     def request_region(self, box):
         return self._call("region", box=list(map(int, box)), timeout=15)
 
+    def request_clear(self):
+        return self._call("clear", timeout=8)
+
     def request_pause(self):
         return self._call("pause", timeout=8)
 
