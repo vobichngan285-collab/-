@@ -66,7 +66,15 @@ jobs:
           print('PASS real original Luna startup and local IPC')
           # First pause the original scan to prevent a large inference while
           # exercising original Qt GUI range management.
-          p = request('pause')
+          print('Original process startup grace: 14 sec before first Qt GUI method')
+          time.sleep(14)
+          p = None
+          for attempt in range(3):
+              p = request('pause')
+              print('Original Qt pause attempt:',attempt+1,p)
+              if p.get('ok'):
+                  break
+              time.sleep(8)
           assert p.get('ok'), ('pause',p)
           print('PASS original ocrtext.pause_recognition')
           r = request('region',box=[80,80,350,260])
