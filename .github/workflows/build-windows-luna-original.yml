@@ -308,9 +308,13 @@ jobs:
           $legacy = @(Get-ChildItem "dist/GameTextReader/_internal/models" -Filter '*.onnx' -File)
           if ($legacy.Count -ne 2) { throw "Expected 2 legacy frozen self-test weights, got $($legacy.Count)" }
           $original = @(Get-ChildItem "dist/GameTextReader/LunaOriginal/LunaTranslator_x64/files/ocrmodel" -Recurse -Filter '*.onnx' -File)
-          if ($original.Count -ne 2) { throw "Expected 2 official Luna bundled model weights, got $($original.Count)" }
+          if ($original.Count -ne 2) { throw "Expected 2 untouched original v5 models, got $($original.Count)" }
+          $userModel = @(Get-ChildItem "dist/GameTextReader/LunaOriginal/LunaTranslator_x64/cache/ocrmodel" -Recurse -Filter '*.onnx' -File)
+          if ($userModel.Count -ne 2) { throw "Expected 2 official PP-OCRv6_small model weights, got $($userModel.Count)" }
+          $userDict = @(Get-ChildItem "dist/GameTextReader/LunaOriginal/LunaTranslator_x64/cache/ocrmodel" -Recurse -Filter 'dict.txt' -File)
+          if ($userDict.Count -ne 1) { throw "Expected one matching original v6 Small dictionary" }
           $allOnnx = @(Get-ChildItem "dist/GameTextReader" -Recurse -Filter '*.onnx')
-          if (@($allOnnx).Count -ne 4) { throw "Expected 4 separately bundled weights (2 legacy + 2 original), got $(@($allOnnx).Count)" }
+          if (@($allOnnx).Count -ne 6) { throw "Expected 6 separately bundled weights (2 legacy + 2 Luna v5 + 2 Luna v6 Small), got $(@($allOnnx).Count)" }
           foreach ($file in $allOnnx) {
             if ($file.Name -match '(?i)medium') { throw 'Medium OCR model must not ship' }
           }
