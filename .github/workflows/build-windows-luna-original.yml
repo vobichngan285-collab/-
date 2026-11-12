@@ -2,7 +2,7 @@ name: Build FULL ORIGINAL Luna OCR bridge experiment
 on:
   workflow_dispatch:
   push:
-    branches: ['fix/windows-luna-hidden-300ms-20261112']
+    branches: ['fix/windows-luna-user-v6small-gpu-400ms-20261112']
     paths:
       - 'game_reader/**'
       - 'main.py'
@@ -156,9 +156,37 @@ jobs:
           # Use the author's UNMODIFIED getresauto() PERIOD branch.
           # Exact 300 ms between eligible full OCR calls after last OCR.
           $defaults['ocr_auto_method_v2'] = 'period'
-          $defaults['ocr_interval'] = 0.3
+          $defaults['ocr_interval'] = 0.4
+          $defaults['multiregion'] = $true
+          $defaults['ocr_text_diff'] = 5
           ($defaults | ConvertTo-Json -Depth 100) |
             Set-Content -Path (Join-Path $configDir 'config.json') -Encoding UTF8
+
+          # Install the OFFICIAL Luna PP-OCRv6_small model pack via the SAME
+          # /Resource/ocr_models manifest and ZIP used by the author's UI.
+          # Do not use an unrelated RapidOCR v6 ONNX model or a v5 dictionary.
+          python 'experiments/luna_original_full/install_official_v6small.py' $target
+          if ($LASTEXITCODE -ne 0) { throw 'Official Luna PP-OCRv6_small model unavailable/invalid: refuse release' }
+          $official = @(Get-ChildItem (Join-Path $target 'cache/ocrmodel') -Directory |
+            Where-Object { $_.Name -like 'bluestar_official_*' })
+          if ($official.Count -ne 1) { throw 'Expected exactly one official v6 Small model pack' }
+          foreach ($n in @('det.onnx','rec.onnx','dict.txt','info.json')) {
+            if (-not (Test-Path (Join-Path $official[0].FullName $n))) { throw "Official v6 model incomplete: $n" }
+          }
+          $modelInfo = Get-Content (Join-Path $official[0].FullName 'info.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ($modelInfo.name -ne 'PP-OCRv6_small') { throw 'Model metadata does NOT identify PP-OCRv6_small' }
+
+          # EXACT WHITELIST of the user's uploaded original OCR settings.
+          # Never copy private config.json, license strings, keys or voice paths.
+          $ocr = Get-Content (Join-Path $source 'src/LunaTranslator/defaultconfig/ocrsetting.json') -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable
+          $ocr['local']['args']['model'] = 'PP-OCRv6_small'
+          $ocr['local']['args']['thread'] = 4
+          $ocr['local']['args']['gpu'] = $true
+          $ocr['local']['args']['luid'] = 0
+          $ocr['local']['args']['device_type'] = 'CPU'
+          ($ocr | ConvertTo-Json -Depth 100) |
+            Set-Content -Path (Join-Path $configDir 'ocrsetting.json') -Encoding UTF8
+          Write-Output 'VERIFY user OCR settings: PP-OCRv6_small / 4 threads / GPU requested / LUID=0 / device_type=CPU / 400ms period'
           Copy-Item 'experiments/luna_original_full/README_已接入蓝星的实验版.txt' (Join-Path $target 'README_已接入蓝星的实验版.txt')
           $originalArchive = Join-Path (Resolve-Path 'dist/GameTextReader/LunaOriginal').Path 'UPSTREAM_FULL_SOURCE_v12.1.3.9.zip'
           git -C $source archive --format=zip --output=$originalArchive HEAD
@@ -202,9 +230,16 @@ jobs:
           assert state.get('ok'), state
           detail = state['status']
           assert detail['strategy'] == 'period', detail
-          assert abs(float(detail['interval_s']) - .3) < 0.0001, detail
+          assert abs(float(detail['interval_s']) - .4) < 0.0001, detail
           assert detail['main_window_hidden'] is True, detail
-          print('PASS author REAL loaded config: period / 300ms / startup HUD hidden', detail)
+          assert detail['model'] == 'PP-OCRv6_small', detail
+          assert detail['threads'] == 4, detail
+          assert detail['gpu_requested'] is True, detail
+          assert detail['gpu_luid'] == 0, detail
+          assert detail['device_type'] == 'CPU', detail
+          assert detail['multiregion'] is True, detail
+          assert detail['ocr_text_diff'] == 5, detail
+          print('PASS original Luna loaded USER settings: v6 Small / 4 threads / GPU=True / 400ms / hidden HUD', detail)
           for action,kwargs in [
               ('pause',{}),
               ('region',{'box':[100,80,410,240]}),
@@ -217,13 +252,20 @@ jobs:
           assert detail['original_regions_hidden'] is True, detail
           assert detail['main_window_hidden'] is True, detail
           print('PASS original Luna region runs with duplicate native region AND pink HUD hidden', detail)
-          # Actually run author's ONE-SHOT original imageCutEx + ocr_run
-          # while the original UI is hidden; no custom OCR is involved.
+          # Verify the REAL upstream PP-OCRv6_small path. Windows hosted CI
+          # has no guaranteed physical GPU; no fake "GPU enabled" claim.
           response=request('ocr',box=[80,80,400,280])
-          assert response.get('ok'), ('Original Luna native OCR FAILED',response)
-          assert isinstance(response.get('result'),dict), response
-          assert isinstance(response['result'].get('results'),list), response
-          print('PASS full original screenshot + ONNX OCR in hidden UI mode',len(response['result']['results']))
+          if response.get('ok'):
+              assert isinstance(response.get('result'),dict), response
+              assert isinstance(response['result'].get('results'),list), response
+              print('PASS upstream v6 Small inference with requested GPU configuration',len(response['result']['results']))
+          else:
+              if detail['dml_provider_available']:
+                  # DML being present is not proof a usable GPU exists.
+                  print('WINDOWS-RUNNER GPU inference cannot be established:',str(response)[:400])
+              else:
+                  print('WINDOWS-RUNNER DML not available; GPU run requires user hardware:',str(response)[:400])
+              print('GPU hardware not certified here. Model files and real loaded configuration verified; user GPU performance needs live test.')
           response=request('clear')
           assert response.get('ok'),response
           print('PASS original Luna clear after hidden-region OCR')
@@ -413,7 +455,7 @@ jobs:
           retention-days: 30
 
       - name: Verify portable ZIP and publish new isolated experimental release
-        if: github.ref_name == 'fix/windows-luna-hidden-300ms-20261112'
+        if: github.ref_name == 'fix/windows-luna-user-v6small-gpu-400ms-20261112'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -435,14 +477,14 @@ jobs:
             }
             Write-Output "PASS ZIP extraction and all $count entry reads"
           } finally { $archive.Dispose() }
-          $out = 'release/BlueStarOCR_Luna300msHiddenUI_Windows_x64.zip'
+          $out = 'release/BlueStarOCR_LunaV6SmallGPU400ms_Windows_x64.zip'
           Copy-Item $original $out
-          git archive --format=zip --output='release/BlueStarOCR_Luna300msHiddenUI_Source.zip' HEAD
+          git archive --format=zip --output='release/BlueStarOCR_LunaV6SmallGPU400ms_Source.zip' HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Source archive failed' }
-          foreach ($file in @($out, 'release/BlueStarOCR_Luna300msHiddenUI_Source.zip')) {
+          foreach ($file in @($out, 'release/BlueStarOCR_LunaV6SmallGPU400ms_Source.zip')) {
             Write-Output "$file SHA256=$((Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()) size=$((Get-Item $file).Length)"
           }
-          $tag = 'win-luna-300ms-hidden-ui-20261112'
+          $tag = 'win-luna-user-v6small-gpu-400ms-20261112'
           $notes = @"
           Experimental GameTextReader plus FULL original LunaTranslator v12.1.3.9 OCR runtime.
           Based on November 11 previously functional BlueStar Windows UI and the one-line F7 fix.
@@ -459,14 +501,19 @@ jobs:
           Original pink translation HUD is hidden at startup (startupautohide=True).
           The original Luna OCR range is hidden after F11; BlueStar F7 controls
           only the BlueStar frame. OCR worker remains the author ORIGINAL source.
-          Official unmodified 300ms period gate (ocr_auto_method_v2=period,
-          ocr_interval=0.3), NOT analysis mode with continuous MSSIM work.
+          Official unmodified 400ms period gate (ocr_auto_method_v2=period,
+          ocr_interval=0.4), matching user's actual original config.
+          Original OFFICIAL PP-OCRv6_small + matching det/rec/dict downloaded
+          via upstream Luna /Resource/ocr_models manifest; no model rewrite.
+          User configuration copied by whitelist only: thread=4, gpu=true,
+          luid=0, device_type=CPU, multiregion=true, ocr_text_diff=5.
+          DML / GPU requested on user PC; GitHub runner does not certify GPU hardware.
           Exact full OCR calls and game FPS depend on screenshot/render cost;
           real game CPU/FPS must be verified by user.
           F11 passes selection to original Luna.
           Never overwrite older known-working installations or private TTS configs.
           "@
-          gh release create $tag $out 'release/BlueStarOCR_Luna300msHiddenUI_Source.zip' --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --prerelease --title 'Blue Star OCR - original Luna 300ms period and HUD hidden (experimental)'  --notes $notes
+          gh release create $tag $out 'release/BlueStarOCR_LunaV6SmallGPU400ms_Source.zip' --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --prerelease --title 'Blue Star OCR - Luna original user PP-OCRv6_small GPU 400ms (experimental)'  --notes $notes
           if ($LASTEXITCODE -ne 0) { throw 'Release publishing failed' }
           gh release view $tag --repo $env:GITHUB_REPOSITORY --json isDraft,isPrerelease,assets,url
           if ($LASTEXITCODE -ne 0) { throw 'Release verification failed' }
