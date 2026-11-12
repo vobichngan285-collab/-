@@ -76,6 +76,40 @@ def patch_non_ocr_startup_validation(root: Path) -> None:
     print("PASS: patched only ORIGINAL optional NON-OCR startup file check", flush=True)
 
 
+def patch_upstream_non_ocr_bootstrap(root: Path) -> None:
+    """Bypass unused Luna GUI startup services, keep author's OCR unchanged.
+
+    Full original source accompanies the binary. This is a narrow patch to
+    the original APPLICATION BOOTSTRAP only; original ocrtext.py,
+    ocrengines/local.py, NativeUtils, CVUtils, and QT region methods are NOT
+    rewritten or replaced. The original GUI context/QApplication remains
+    necessary for upstream OCR region objects.
+    """
+    script = root / "LunaTranslator" / "LunaTranslator.py"
+    src = script.read_text(encoding="utf-8-sig")
+    skip_calls = (
+        "        self.loadmetadatas()",
+        "        self.safeloadprocessmodels()",
+        "        self.prepare(remove=True)",
+        "        self.startxiaoxueguan()",
+        "        self.startreader()",
+        "        self.serviceinit()",
+        "        versioncheckthread()",
+        "        autostartllamacpp()",
+    )
+    for statement in skip_calls:
+        if src.count(statement) != 1:
+            raise RuntimeError("Original Luna bootstrap changed, abort optional disable: " + statement)
+        src = src.replace(statement, "        # BlueStar: optional NON-OCR service disabled")
+    for must in ("self.startoutputer()", "self.starttextsource()",
+                 "self.translation_ui = TranslatorWindow()"):
+        if must not in src:
+            raise RuntimeError("Original OCR bootstrap missing: " + must)
+    compile(src, str(script), "exec")
+    script.write_text(src, encoding="utf-8")
+    print("PASS: original OCR startup kept; 8 optional non-OCR services skipped", flush=True)
+
+
 def prune(root: Path) -> dict:
     root = root.resolve()
     if root.name != "LunaTranslator_x64":
@@ -102,7 +136,8 @@ def prune(root: Path) -> dict:
         report["bytes_removed"] += size
         report["features"].append(reason + ":" + str(count))
     patch_non_ocr_startup_validation(root)
-    report["features"].append("patched legacy startup check for disabled Magpie/Hook/TTS ONLY")
+    patch_upstream_non_ocr_bootstrap(root)
+    report["features"].append("patched optional application bootstrap ONLY, all OCR unchanged")
     for folder in CUT_DIRECTORIES:
         remove(root / folder, folder)
     for exe in CUT_EXECUTABLES:
