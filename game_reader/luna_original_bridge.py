@@ -154,9 +154,14 @@ class LunaOriginalOCR:
                     raise RuntimeError("Luna 原版尚未启动或 IPC 不可用") from exc
                 time.sleep(0.15)
 
-    def recognize_box(self, box):
+    def recognize_box(self, box, *, hwnd=None):
         left, top, right, bottom = tuple(map(int, box))
-        reply = self._call("ocr", box=[left, top, right, bottom], timeout=25)
+        request = {"box": [left, top, right, bottom], "timeout": 25}
+        if hwnd is not None:
+            # Pass the already-bound game HWND to upstream imageCutEx.
+            # Original Luna attempts window capture then desktop fallback.
+            request["hwnd"] = int(hwnd)
+        reply = self._call("ocr", **request)
         return _convert_original_boxes(reply.get("result", {}), (left, top, right, bottom))
 
     def request_region(self, box, visible=True):

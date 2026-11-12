@@ -69,6 +69,15 @@ def parse_paddle_result(result: Any, offset_x: int = 0, offset_y: int = 0,
     return sorted(out, key=lambda l: (l.top, l.left))
 
 
+def keep_detected_rows(lines: Iterable[OCRLine]) -> list[OCRLine]:
+    """Keep each native OCR text box independent for pointer hit-testing.
+
+    Only sort for stable reading order. Do not merge adjacent game menu
+    labels or paragraphs, invent boundaries, or change detected characters.
+    """
+    return sorted(lines, key=lambda line: (line.top, line.left))
+
+
 def hit_test(lines: Iterable[OCRLine], x: int, y: int,
              margin_x: int = 8, margin_y: int = 5) -> OCRLine | None:
     """Choose nearest OCR line under cursor; don't return text far away.

@@ -98,3 +98,51 @@ def test_original_hud_does_not_reappear_when_f7_shows_blue_star_frame():
     # Do not change the author's expensive GDI/similarity/inference source.
     assert "from textio.textsource.ocrtext import imageCutEx" in plugin
     assert "from myutils.ocrutil import ocr_run" in plugin
+
+
+
+def test_pinned_game_hwnd_reaches_unmodified_luna_capture(monkeypatch):
+    engine = bridge.LunaOriginalOCR()
+    observed = []
+    def invoke(action, **kw):
+        observed.append((action, kw))
+        return {"ok": True, "result": {"results": [
+            {"text": "返回游戏", "box": [
+                {"x": 10, "y": 10}, {"x": 110, "y": 10},
+                {"x": 110, "y": 32}, {"x": 10, "y": 32}]}]}}
+    monkeypatch.setattr(engine, "_call", invoke)
+    rows = engine.recognize_box((400, 100, 700, 500), hwnd=1234567)
+    assert observed == [("ocr", {"box": [400, 100, 700, 500],
+                                 "timeout": 25, "hwnd": 1234567})]
+    assert rows[0] == OCRLine("返回游戏", 410, 110, 510, 132, 1.0)
+    engine.close()
+
+
+def test_game_pointer_rows_remain_independent_after_native_ocr():
+    from game_reader.core import keep_detected_rows, hit_test, build_reading_regions
+    native = [
+        OCRLine("继续向前行驶，直到看到下一个路口为止", 30, 76, 350, 102),
+        OCRLine("你现在位于城市的中心区域，请注意安全", 30, 40, 348, 66),
+        OCRLine("继续游戏", 30, 145, 170, 169),
+    ]
+    # Old paragraph fusion put both long rows in a combined rectangle.
+    assert len(build_reading_regions(native)) == 2
+    rows = keep_detected_rows(native)
+    assert len(rows) == 3
+    assert [line.top for line in rows] == [40, 76, 145]
+    assert hit_test(rows, 70, 50).text == native[1].text
+    assert hit_test(rows, 70, 85).text == native[0].text
+    assert hit_test(rows, 70, 155).text == "继续游戏"
+
+
+def test_repaired_runtime_disables_native_line_merge_and_uses_hwnd():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github/workflows/build-windows-luna-original.yml").read_text(encoding="utf-8")
+    plugin = (root / "experiments/luna_original_full/bluestar_outputer.py").read_text(encoding="utf-8")
+    app = (root / "game_reader/app.py").read_text(encoding="utf-8")
+    assert "$defaults['ocrmergelines'] = $false" in workflow
+    assert "$defaults['ocr_text_diff'] = 1" in workflow
+    assert "imageCutEx(hwnd, QRect(" in plugin
+    assert "recognize_box(box, hwnd=game_hwnd)" in app
+    assert "self.lines = keep_detected_rows(lines)" in app

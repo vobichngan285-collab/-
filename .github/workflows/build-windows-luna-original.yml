@@ -1,8 +1,8 @@
-name: Blue Star ORIGINAL Luna OCR-only portable (slim)
+name: Blue Star ORIGINAL Luna row-box OCR game-window fix
 on:
   workflow_dispatch:
   push:
-    branches: ['refactor/windows-luna-ocr-only-slim-20261112']
+    branches: ['fix/windows-luna-ocr-row-boxes-20261112']
     paths:
       - 'game_reader/**'
       - 'main.py'
@@ -158,7 +158,10 @@ jobs:
           $defaults['ocr_auto_method_v2'] = 'period'
           $defaults['ocr_interval'] = 0.4
           $defaults['multiregion'] = $true
-          $defaults['ocr_text_diff'] = 5
+          $defaults['ocr_text_diff'] = 1
+          # The native detector returns independent OCR blocks. Never let
+          # upstream merge neighboring game menu rows into one giant box.
+          $defaults['ocrmergelines'] = $false
           # Disable unused original translation, dictionaries, TTS, game
           # hooking, remote OCR and metadata. BlueStar already owns TTS/UI.
           foreach ($category in @('fanyi','cishu','reader','ocr')) {
@@ -256,7 +259,8 @@ jobs:
           assert detail['gpu_luid'] == 0, detail
           assert detail['device_type'] == 'CPU', detail
           assert detail['multiregion'] is True, detail
-          assert detail['ocr_text_diff'] == 5, detail
+          assert detail['ocr_text_diff'] == 1, detail
+          assert detail['ocr_merge_lines'] is False, detail
           print('PASS original Luna loaded USER settings: v6 Small / 4 threads / GPU=True / 400ms / hidden HUD', detail)
           for action,kwargs in [
               ('pause',{}),
@@ -490,37 +494,37 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory release -Force | Out-Null
-          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_FixedRegion_ThreeModes_Experimental_Windows_x64.zip -CompressionLevel Optimal -Force
-          $size = (Get-Item release/GameTextReader_FixedRegion_ThreeModes_Experimental_Windows_x64.zip).Length
+          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_RowBoxes_GameWindow_Windows_x64.zip -CompressionLevel Optimal -Force
+          $size = (Get-Item release/GameTextReader_RowBoxes_GameWindow_Windows_x64.zip).Length
           Write-Output "Portable archive size: $size bytes"
       - name: Prepare named Windows and source ZIPs for direct Actions artifact download
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          Copy-Item release/GameTextReader_FixedRegion_ThreeModes_Experimental_Windows_x64.zip release/BlueStarOCR_LunaOCROnly_Slim_Windows_x64.zip
-          git archive --format=zip --output=release/BlueStarOCR_LunaOCROnly_Slim_Source.zip HEAD
+          Copy-Item release/GameTextReader_RowBoxes_GameWindow_Windows_x64.zip release/BlueStarOCR_LunaRowBoxes_Windows_x64.zip
+          git archive --format=zip --output=release/BlueStarOCR_LunaRowBoxes_Source.zip HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Could not create source ZIP' }
-          foreach ($name in @('BlueStarOCR_LunaOCROnly_Slim_Windows_x64.zip','BlueStarOCR_LunaOCROnly_Slim_Source.zip')) {
+          foreach ($name in @('BlueStarOCR_LunaRowBoxes_Windows_x64.zip','BlueStarOCR_LunaRowBoxes_Source.zip')) {
             if (-not (Test-Path (Join-Path release $name))) { throw "Missing named artifact $name" }
             Write-Output "$name sha256=$((Get-FileHash (Join-Path release $name) -Algorithm SHA256).Hash.ToLowerInvariant())"
           }
       - uses: actions/upload-artifact@v4
         with:
-          name: BlueStarOCR-Luna-OCR-ONLY-SLIM-Windows
+          name: BlueStarOCR-Luna-RowBoxes-Windows
           path: |
-            release/BlueStarOCR_LunaOCROnly_Slim_Windows_x64.zip
-            release/BlueStarOCR_LunaOCROnly_Slim_Source.zip
+            release/BlueStarOCR_LunaRowBoxes_Windows_x64.zip
+            release/BlueStarOCR_LunaRowBoxes_Source.zip
           if-no-files-found: error
           retention-days: 30
 
       - name: Verify published download artifact ZIP contents (release API optional)
-        if: github.ref_name == 'refactor/windows-luna-ocr-only-slim-20261112'
+        if: github.ref_name == 'fix/windows-luna-ocr-row-boxes-20261112'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $original = 'release/GameTextReader_FixedRegion_ThreeModes_Experimental_Windows_x64.zip'
+          $original = 'release/GameTextReader_RowBoxes_GameWindow_Windows_x64.zip'
           if (-not (Test-Path $original)) { throw 'Verified Windows ZIP missing' }
           $archive = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $original).Path)
           try {
@@ -536,14 +540,14 @@ jobs:
             }
             Write-Output "PASS ZIP extraction and all $count entry reads"
           } finally { $archive.Dispose() }
-          $out = 'release/BlueStarOCR_LunaOCROnly_Slim_Windows_x64.zip'
+          $out = 'release/BlueStarOCR_LunaRowBoxes_Windows_x64.zip'
           Copy-Item $original $out
-          git archive --format=zip --output='release/BlueStarOCR_LunaOCROnly_Slim_Source.zip' HEAD
+          git archive --format=zip --output='release/BlueStarOCR_LunaRowBoxes_Source.zip' HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Source archive failed' }
-          foreach ($file in @($out, 'release/BlueStarOCR_LunaOCROnly_Slim_Source.zip')) {
+          foreach ($file in @($out, 'release/BlueStarOCR_LunaRowBoxes_Source.zip')) {
             Write-Output "$file SHA256=$((Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()) size=$((Get-Item $file).Length)"
           }
-          $tag = 'win-luna-ocr-only-slim-20261112'
+          $tag = 'win-luna-rowboxes-hwnd-20261112'
           $notes = @"
           Experimental GameTextReader plus FULL original LunaTranslator v12.1.3.9 OCR runtime.
           Based on November 11 previously functional BlueStar Windows UI and the one-line F7 fix.
@@ -565,17 +569,26 @@ jobs:
           Original OFFICIAL PP-OCRv6_small + matching det/rec/dict downloaded
           via upstream Luna /Resource/ocr_models manifest; no model rewrite.
           User configuration copied by whitelist only: thread=4, gpu=true,
-          luid=0, device_type=CPU, multiregion=true, ocr_text_diff=5.
+          luid=0, device_type=CPU, multiregion=true, ocr_text_diff=1.
+          Fixes F8 independent pointer line boxes by disabling upstream
+          ocrmergelines and disabling BlueStar's extra paragraph fusion.
+          F8 sends pinned original game HWND to the upstream imageCutEx;
+          upstream fallback remains unchanged. CPU-model OCR and UIA CI gated.
+          Non-OCR deletions from the failed second-phase experiment are not
+          included in this build; it is based on the earlier verified slim V1.
           DML / GPU requested on user PC; GitHub runner does not certify GPU hardware.
           Exact full OCR calls and game FPS depend on screenshot/render cost;
           real game CPU/FPS must be verified by user.
           F11 passes selection to original Luna.
           Never overwrite older known-working installations or private TTS configs.
           "@
-          # The repository has denied release creation with HTTP 403
-          # "Resource not accessible by integration". A fully verified ZIP
-          # already exists as the GitHub Actions artifact above, and never
-          # depends on release API permissions. Do not mark valid binaries
-          # failed or invent a release URL when token permissions are read-only.
-          Write-Output 'PASS verified named downloadable Actions artifact; release upload unavailable to GitHub Actions token (HTTP 403).'
-          Write-Output "To download, open this successful workflow run -> Artifacts -> BlueStarOCR-Luna-OCR-ONLY-SLIM-Windows."
+          # The Actions ZIP is always uploaded before the optional public
+          # release. Some repo tokens return 403 for createRelease.
+          # Only a confirmed release creates a valid public browser URL.
+          gh release create $tag $out 'release/BlueStarOCR_LunaRowBoxes_Source.zip' --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title 'Blue Star OCR - Line Boxes and Game Window Fix' --prerelease --notes $notes
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning 'Public Release API is unavailable; validated Actions artifact remains available.'
+          } else {
+            gh release view $tag --repo $env:GITHUB_REPOSITORY --json url,assets
+            if ($LASTEXITCODE -ne 0) { throw 'Could not verify public release after upload' }
+          }

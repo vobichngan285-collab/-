@@ -63,6 +63,7 @@ class _ChangeRegion:
                             "dml_provider_available": dml_available,
                             "multiregion": globalconfig.get("multiregion"),
                             "ocr_text_diff": globalconfig.get("ocr_text_diff"),
+                            "ocr_merge_lines": globalconfig.get("ocrmergelines"),
                             "main_window_hidden": bool(ui and ui.isHidden()),
                             "source": type(source).__name__ if source is not None else None,
                             "original_region_count": len(getattr(source, "ranges", [])),
@@ -209,7 +210,15 @@ class Outputer(Base):
                     from myutils.ocrutil import ocr_run
                     from qtsymbols import QRect
                     l,t,r,b = _bounded_region(request.get("box"))
-                    image = imageCutEx(None, QRect(l,t,r-l,b-t))
+                    hwnd = request.get("hwnd")
+                    if hwnd is not None and (
+                        type(hwnd) is not int or not 0 < hwnd < 2**64
+                    ):
+                        raise ValueError("Invalid game window handle")
+                    # The upstream OCR capture API already supports pinned
+                    # game HWND and falls back to desktop when it cannot
+                    # capture the window. No custom screenshot logic.
+                    image = imageCutEx(hwnd, QRect(l,t,r-l,b-t))
                     if image.isNull():
                         raise RuntimeError("Original Luna imageCutEx returned empty image")
                     parsed = ocr_run(image)

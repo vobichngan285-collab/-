@@ -18,7 +18,7 @@ from queue import Empty, Queue
 from tkinter import ttk, filedialog
 from PIL import ImageGrab
 
-from .core import HoverTracker, OCRLine, hit_test, build_reading_regions
+from .core import HoverTracker, OCRLine, hit_test, build_reading_regions, keep_detected_rows
 from .luna_original_bridge import LunaOriginalOCR
 from .win_screen import (enable_dpi_awareness, get_cursor, is_key_down,
                          grab_current_monitor, grab_game_rect,
@@ -1553,7 +1553,7 @@ class ReaderApp:
                 waiting_at = time.monotonic()
                 with self._ocr_lock:
                     lock_ms = round((time.monotonic() - waiting_at) * 1000)
-                    lines = self.ocr_worker.recognize_box(box)
+                    lines = self.ocr_worker.recognize_box(box, hwnd=game_hwnd)
                     preprocess_ms = 0
                     engine_ms = round((time.monotonic() - waiting_at) * 1000)
                 infer_ms = engine_ms
@@ -1581,7 +1581,7 @@ class ReaderApp:
                     self.read_btn.configure(state="normal")
                     source = extra[0] if extra else "fullscreen"
                     timings = extra[1] if len(extra) > 1 else None
-                    self.lines = build_reading_regions(lines)
+                    self.lines = keep_detected_rows(lines)
                     speakable = filter_speech_text(
                         "\n".join(region.text for region in self.lines), self.settings)
                     # Queue the short cue before Tk text/status rendering. No fake
