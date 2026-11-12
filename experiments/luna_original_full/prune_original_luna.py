@@ -69,8 +69,8 @@ def patch_non_ocr_startup_validation(root: Path) -> None:
             raise RuntimeError("Official integrity check structure unexpectedly changed: "+critical)
     # All original DLL checks above, notably NativeUtils, CVUtils,
     # onnxruntime and DirectML, remain intact. No OCR source is changed.
-    replacement = ("    # BlueStar OCR-only package: removed game Hook/Magpie/TTS apps.\\n"
-                   "    # Keep the original required OCR DLL checks above.\\n")
+    replacement = ("    # BlueStar OCR-only package: removed game Hook/Magpie/TTS apps.\n"
+                   "    # Keep the original required OCR DLL checks above.\n")
     code = code[:cut_start] + replacement + code[cut_end:]
     source.write_text(code, encoding="utf-8")
     print("PASS: patched only ORIGINAL optional NON-OCR startup file check", flush=True)
