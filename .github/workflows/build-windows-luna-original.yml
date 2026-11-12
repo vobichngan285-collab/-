@@ -1,13 +1,14 @@
-name: Build FULL ORIGINAL Luna OCR bridge experiment
+name: Blue Star ORIGINAL Luna OCR-only portable (slim)
 on:
   workflow_dispatch:
   push:
-    branches: ['fix/windows-luna-user-v6small-gpu-400ms-20261112']
+    branches: ['refactor/windows-luna-ocr-only-slim-20261112']
     paths:
       - 'game_reader/**'
       - 'main.py'
       - 'prepare_models.py'
       - 'requirements-win.txt'
+      - 'requirements-legacy-tests.txt'
       - 'tests/**'
       - 'experiments/luna_original_full/**'
       - '.github/workflows/build-windows-luna-original.yml'
@@ -32,7 +33,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-win.txt
           python -m pip install pyinstaller==6.16.0 pytest
-          python -c "import rapidocr, onnxruntime; print('rapidocr',rapidocr.__file__);print('onnxruntime',onnxruntime.__version__)"
+          # Historical unit tests use RapidOCR, but it must NOT enter frozen EXE.
+          python -m pip install -r requirements-legacy-tests.txt
+          python -c "import rapidocr, onnxruntime; print('legacy TEST-only OCR installed')"
           python -c "from winrt.windows.media.speechsynthesis import SpeechSynthesizer; from winrt.windows.media.playback import MediaPlayer; print('WinRT speech installed')"
       - name: Test source syntax and screen coordinate logic
         shell: pwsh
@@ -42,14 +45,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Unit tests failed; do not build' }
           python -m compileall -q main.py game_reader
           if ($LASTEXITCODE -ne 0) { throw 'Syntax check failed; do not build' }
-      - name: Prepare original V1.2 Small DET + REC weights only
+      - name: Build OCR-only front end without dead ONNX/OpenCV/Numpy
         shell: pwsh
         run: |
-          python prepare_models.py
-      - name: Build lean portable EXE folder
-        shell: pwsh
-        run: |
-          pyinstaller --clean --noconfirm --onedir --windowed --name GameTextReader --collect-data rapidocr --collect-binaries onnxruntime --collect-all winrt --collect-all tk_uia --add-data 'models;models' main.py
+          pyinstaller --clean --noconfirm --onedir --windowed --name GameTextReader --collect-all winrt --collect-all tk_uia --exclude-module game_reader.ocr_backend --exclude-module rapidocr --exclude-module onnxruntime --exclude-module cv2 --exclude-module numpy --exclude-module scipy --exclude-module shapely main.py
+          if ($LASTEXITCODE -ne 0) { throw 'Slim OCR-only freeze failed' }
           if (-not (Test-Path dist/GameTextReader/GameTextReader.exe)) { throw 'EXE missing' }
       - name: Install exact unchanged author release and GPLv3 source
         shell: pwsh
@@ -159,6 +159,24 @@ jobs:
           $defaults['ocr_interval'] = 0.4
           $defaults['multiregion'] = $true
           $defaults['ocr_text_diff'] = 5
+          # Disable unused original translation, dictionaries, TTS, game
+          # hooking, remote OCR and metadata. BlueStar already owns TTS/UI.
+          foreach ($category in @('fanyi','cishu','reader','ocr')) {
+            foreach ($name in @($defaults[$category].Keys)) {
+              if ($defaults[$category][$name] -is [hashtable]) {
+                $defaults[$category][$name]['use'] = ($category -eq 'ocr' -and $name -eq 'local')
+              }
+            }
+          }
+          foreach ($name in @($defaults['metadata'].Keys)) {
+            if ($defaults['metadata'][$name] -is [hashtable]) { $defaults['metadata'][$name]['auto'] = $false }
+          }
+          foreach ($name in @($defaults['transoptimi'].Keys)) { $defaults['transoptimi'][$name] = $false }
+          foreach ($name in @($defaults['sourcestatus2'].Keys)) {
+            $defaults['sourcestatus2'][$name]['use'] = ($name -eq 'ocr')
+          }
+          $defaults['textoutputer']['clipboard']['use'] = $false
+          $defaults['textoutputer']['websocket']['use'] = $false
           ($defaults | ConvertTo-Json -Depth 100) |
             Set-Content -Path (Join-Path $configDir 'config.json') -Encoding UTF8
 
@@ -345,63 +363,16 @@ jobs:
             throw "GPU=true user configuration not restored before packaging"
           }
           Write-Output 'PASS exact original user GPU configuration restored and will ship'
-      - name: Remove duplicated RapidOCR model weights
+      - name: Assert NONE of the abandoned RapidOCR/ONNX stack was shipped
         shell: pwsh
         run: |
-          # Our app loads explicit files from _internal/models, not rapidocr/models.
-          # --collect-data rapidocr otherwise duplicates all four weights.
-          $extra = 'dist/GameTextReader/_internal/rapidocr/models'
-          foreach ($name in @('PP-OCRv6_det_small.onnx','PP-OCRv6_rec_small.onnx','PP-OCRv6_det_medium.onnx','PP-OCRv6_rec_medium.onnx')) {
-            $duplicate = Join-Path $extra $name
-            if (Test-Path $duplicate) {
-              Remove-Item $duplicate -Force
-              Write-Output "Removed redundant weight: $name"
-            }
+          $ErrorActionPreference = 'Stop'
+          $internal = 'dist/GameTextReader/_internal'
+          foreach ($name in @('rapidocr','onnxruntime','cv2','numpy','models','scipy','shapely')) {
+            if (Test-Path (Join-Path $internal $name)) { throw "Dead engine still bundled: $name" }
           }
-          # Original V1.2 always passes use_cls=False, so classifying weights are unused.
-          $clsFiles = @(Get-ChildItem dist/GameTextReader/_internal/rapidocr -Recurse -Filter '*cls*.onnx' -ErrorAction SilentlyContinue)
-          foreach ($file in $clsFiles) {
-            Remove-Item $file.FullName -Force
-            Write-Output "Removed unused classifier: $($file.Name)"
-          }
-      - name: Verify bundled models
-        shell: pwsh
-        run: |
-          $names = @('PP-OCRv6_det_small.onnx','PP-OCRv6_rec_small.onnx')
-          foreach ($name in $names) {
-            $file = Join-Path "dist/GameTextReader/_internal/models" $name
-            if (-not (Test-Path $file)) { throw "Missing offline ONNX: $name" }
-          }
-          # This experimental bundle deliberately includes TWO independent
-          # systems: the untouched author's original full OCR model and the
-          # legacy Small model retained only for frozen EXE self-test/rollback.
-          # The shipped app delegates recognition ONLY to original Luna.
-          $legacy = @(Get-ChildItem "dist/GameTextReader/_internal/models" -Filter '*.onnx' -File)
-          if ($legacy.Count -ne 2) { throw "Expected 2 legacy frozen self-test weights, got $($legacy.Count)" }
-          $original = @(Get-ChildItem "dist/GameTextReader/LunaOriginal/LunaTranslator_x64/files/ocrmodel" -Recurse -Filter '*.onnx' -File)
-          if ($original.Count -ne 2) { throw "Expected 2 untouched original v5 models, got $($original.Count)" }
-          $userModel = @(Get-ChildItem "dist/GameTextReader/LunaOriginal/LunaTranslator_x64/cache/ocrmodel" -Recurse -Filter '*.onnx' -File)
-          if ($userModel.Count -ne 2) { throw "Expected 2 official PP-OCRv6_small model weights, got $($userModel.Count)" }
-          $userDict = @(Get-ChildItem "dist/GameTextReader/LunaOriginal/LunaTranslator_x64/cache/ocrmodel" -Recurse -Filter 'dict.txt' -File)
-          if ($userDict.Count -ne 1) { throw "Expected one matching original v6 Small dictionary" }
-          $allOnnx = @(Get-ChildItem "dist/GameTextReader" -Recurse -Filter '*.onnx')
-          if (@($allOnnx).Count -ne 6) { throw "Expected 6 separately bundled weights (2 legacy + 2 Luna v5 + 2 Luna v6 Small), got $(@($allOnnx).Count)" }
-          foreach ($file in $allOnnx) {
-            if ($file.Name -match '(?i)medium') { throw 'Medium OCR model must not ship' }
-          }
-      - name: Truly execute frozen EXE and test original V1.2 Small OCR
-        shell: pwsh
-        run: |
-          $testLog = Join-Path $env:TEMP 'GameTextReader_ocr_selftest.txt'
-          Remove-Item $testLog -Force -ErrorAction SilentlyContinue
-          $exe = (Resolve-Path 'dist/GameTextReader/GameTextReader.exe').Path
-          $process = Start-Process -FilePath $exe -ArgumentList '--self-test-ocr' -Wait -PassThru
-          if (-not (Test-Path $testLog)) { throw 'Frozen GUI EXE did not create the OCR verification log' }
-          $report = Get-Content $testLog -Raw
-          Write-Output $report
-          if (($process.ExitCode -ne 0) -or (-not $report.StartsWith('PASS'))) {
-            throw "Frozen OCR failed; exit=$($process.ExitCode)"
-          }
+          if (Test-Path 'dist/GameTextReader/models') { throw 'Abandoned OCR weights still bundled' }
+          Write-Output 'PASS NO bundled RapidOCR/ONNX/OpenCV/NumPy or old OCR weights'
       - name: Verify bundled SAPI and WinRT voice API
         shell: pwsh
         run: |
@@ -526,24 +497,24 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          Copy-Item release/GameTextReader_FixedRegion_ThreeModes_Experimental_Windows_x64.zip release/BlueStarOCR_LunaV6SmallGPU400ms_Windows_x64.zip
-          git archive --format=zip --output=release/BlueStarOCR_LunaV6SmallGPU400ms_Source.zip HEAD
+          Copy-Item release/GameTextReader_FixedRegion_ThreeModes_Experimental_Windows_x64.zip release/BlueStarOCR_LunaOCROnly_Slim_Windows_x64.zip
+          git archive --format=zip --output=release/BlueStarOCR_LunaOCROnly_Slim_Source.zip HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Could not create source ZIP' }
-          foreach ($name in @('BlueStarOCR_LunaV6SmallGPU400ms_Windows_x64.zip','BlueStarOCR_LunaV6SmallGPU400ms_Source.zip')) {
+          foreach ($name in @('BlueStarOCR_LunaOCROnly_Slim_Windows_x64.zip','BlueStarOCR_LunaOCROnly_Slim_Source.zip')) {
             if (-not (Test-Path (Join-Path release $name))) { throw "Missing named artifact $name" }
             Write-Output "$name sha256=$((Get-FileHash (Join-Path release $name) -Algorithm SHA256).Hash.ToLowerInvariant())"
           }
       - uses: actions/upload-artifact@v4
         with:
-          name: BlueStarOCR-Luna-V6Small-GPU-400ms-Windows
+          name: BlueStarOCR-Luna-OCR-ONLY-SLIM-Windows
           path: |
-            release/BlueStarOCR_LunaV6SmallGPU400ms_Windows_x64.zip
-            release/BlueStarOCR_LunaV6SmallGPU400ms_Source.zip
+            release/BlueStarOCR_LunaOCROnly_Slim_Windows_x64.zip
+            release/BlueStarOCR_LunaOCROnly_Slim_Source.zip
           if-no-files-found: error
           retention-days: 30
 
       - name: Verify published download artifact ZIP contents (release API optional)
-        if: github.ref_name == 'fix/windows-luna-user-v6small-gpu-400ms-20261112'
+        if: github.ref_name == 'refactor/windows-luna-ocr-only-slim-20261112'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -565,14 +536,14 @@ jobs:
             }
             Write-Output "PASS ZIP extraction and all $count entry reads"
           } finally { $archive.Dispose() }
-          $out = 'release/BlueStarOCR_LunaV6SmallGPU400ms_Windows_x64.zip'
+          $out = 'release/BlueStarOCR_LunaOCROnly_Slim_Windows_x64.zip'
           Copy-Item $original $out
-          git archive --format=zip --output='release/BlueStarOCR_LunaV6SmallGPU400ms_Source.zip' HEAD
+          git archive --format=zip --output='release/BlueStarOCR_LunaOCROnly_Slim_Source.zip' HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Source archive failed' }
-          foreach ($file in @($out, 'release/BlueStarOCR_LunaV6SmallGPU400ms_Source.zip')) {
+          foreach ($file in @($out, 'release/BlueStarOCR_LunaOCROnly_Slim_Source.zip')) {
             Write-Output "$file SHA256=$((Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()) size=$((Get-Item $file).Length)"
           }
-          $tag = 'win-luna-user-v6small-gpu-400ms-20261112'
+          $tag = 'win-luna-ocr-only-slim-20261112'
           $notes = @"
           Experimental GameTextReader plus FULL original LunaTranslator v12.1.3.9 OCR runtime.
           Based on November 11 previously functional BlueStar Windows UI and the one-line F7 fix.
@@ -607,4 +578,4 @@ jobs:
           # depends on release API permissions. Do not mark valid binaries
           # failed or invent a release URL when token permissions are read-only.
           Write-Output 'PASS verified named downloadable Actions artifact; release upload unavailable to GitHub Actions token (HTTP 403).'
-          Write-Output "To download, open this successful workflow run -> Artifacts -> BlueStarOCR-Luna-V6Small-GPU-400ms-Windows."
+          Write-Output "To download, open this successful workflow run -> Artifacts -> BlueStarOCR-Luna-OCR-ONLY-SLIM-Windows."
