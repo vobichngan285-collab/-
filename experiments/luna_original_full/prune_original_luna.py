@@ -20,6 +20,8 @@ KEEP_PYTHON = {
     "tts": {"basettsclass.py", "__init__.py"},
     "cishu": {"cishubase.py", "__init__.py"},
     "ocrengines": {"baseocrclass.py", "local.py", "__init__.py"},
+    "metadata": {"abstract.py", "__init__.py"},
+    "transoptimi": {"__init__.py"},
 }
 CUT_DIRECTORIES = (
     "files/Magpie",
