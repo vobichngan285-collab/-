@@ -331,7 +331,7 @@ jobs:
               assert isinstance(data.get('result'),dict),data
               assert isinstance(data['result'].get('results'),list),data
               print('PASS real upstream PP-OCRv6_small model+dict on CPU',len(data['result']['results']))
-              print('GPU acceleration was NOT certified on hosted runner; only user's GPU flag is preserved')
+              print("GPU acceleration was NOT certified on hosted runner; only the user GPU request is preserved")
           '@ | python -
               if ($LASTEXITCODE -ne 0) { throw 'Original v6 Small ONNX+dict inference failed on CPU fallback' }
             } finally {
@@ -522,14 +522,27 @@ jobs:
           Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_FixedRegion_ThreeModes_Experimental_Windows_x64.zip -CompressionLevel Optimal -Force
           $size = (Get-Item release/GameTextReader_FixedRegion_ThreeModes_Experimental_Windows_x64.zip).Length
           Write-Output "Portable archive size: $size bytes"
+      - name: Prepare named Windows and source ZIPs for direct Actions artifact download
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Copy-Item release/GameTextReader_FixedRegion_ThreeModes_Experimental_Windows_x64.zip release/BlueStarOCR_LunaV6SmallGPU400ms_Windows_x64.zip
+          git archive --format=zip --output=release/BlueStarOCR_LunaV6SmallGPU400ms_Source.zip HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create source ZIP' }
+          foreach ($name in @('BlueStarOCR_LunaV6SmallGPU400ms_Windows_x64.zip','BlueStarOCR_LunaV6SmallGPU400ms_Source.zip')) {
+            if (-not (Test-Path (Join-Path release $name))) { throw "Missing named artifact $name" }
+            Write-Output "$name sha256=$((Get-FileHash (Join-Path release $name) -Algorithm SHA256).Hash.ToLowerInvariant())"
+          }
       - uses: actions/upload-artifact@v4
         with:
-          name: GameTextReader-FixedRegion-ThreeModes-Experimental
-          path: release/GameTextReader_FixedRegion_ThreeModes_Experimental_Windows_x64.zip
+          name: BlueStarOCR-Luna-V6Small-GPU-400ms-Windows
+          path: |
+            release/BlueStarOCR_LunaV6SmallGPU400ms_Windows_x64.zip
+            release/BlueStarOCR_LunaV6SmallGPU400ms_Source.zip
           if-no-files-found: error
           retention-days: 30
 
-      - name: Verify portable ZIP and publish new isolated experimental release
+      - name: Verify published download artifact ZIP contents (release API optional)
         if: github.ref_name == 'fix/windows-luna-user-v6small-gpu-400ms-20261112'
         shell: pwsh
         env:
@@ -588,7 +601,10 @@ jobs:
           F11 passes selection to original Luna.
           Never overwrite older known-working installations or private TTS configs.
           "@
-          gh release create $tag $out 'release/BlueStarOCR_LunaV6SmallGPU400ms_Source.zip' --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --prerelease --title 'Blue Star OCR - Luna original user PP-OCRv6_small GPU 400ms (experimental)'  --notes $notes
-          if ($LASTEXITCODE -ne 0) { throw 'Release publishing failed' }
-          gh release view $tag --repo $env:GITHUB_REPOSITORY --json isDraft,isPrerelease,assets,url
-          if ($LASTEXITCODE -ne 0) { throw 'Release verification failed' }
+          # The repository has denied release creation with HTTP 403
+          # "Resource not accessible by integration". A fully verified ZIP
+          # already exists as the GitHub Actions artifact above, and never
+          # depends on release API permissions. Do not mark valid binaries
+          # failed or invent a release URL when token permissions are read-only.
+          Write-Output 'PASS verified named downloadable Actions artifact; release upload unavailable to GitHub Actions token (HTTP 403).'
+          Write-Output "To download, open this successful workflow run -> Artifacts -> BlueStarOCR-Luna-V6Small-GPU-400ms-Windows."
