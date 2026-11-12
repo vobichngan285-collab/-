@@ -10,6 +10,7 @@ from pathlib import Path
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 
 HOST=("127.0.0.1", 29380)
@@ -61,10 +62,12 @@ def main(root):
     ]
     for name in removed:
         assert not (root/name).exists(), f"Non-OCR component was still bundled: {name}"
+    log_path=Path(tempfile.gettempdir())/"bluestar_trim_original_diagnostics.txt"
+    logfile=log_path.open("wb")
     proc=subprocess.Popen(
         [str(root/"LunaTranslator.exe"),"--userconfig","userconfig_bluestar"],
-        cwd=root,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        cwd=root,stdin=subprocess.DEVNULL,stdout=logfile,
+        stderr=subprocess.STDOUT,
     )
     try:
         status=request("status")
@@ -92,7 +95,15 @@ def main(root):
               len(original["result"]["results"]),"lines")
         assert request("clear").get("ok")
         return 0
+    except BaseException:
+        logfile.flush()
+        print("Original Luna stripped process exited with code:",proc.poll(),flush=True)
+        if log_path.is_file():
+            print("Original Luna stderr/stdout tail:\n",
+                  log_path.read_bytes()[-16000:].decode("utf-8",errors="replace"),flush=True)
+        raise
     finally:
+        logfile.close()
         if proc.poll() is None:
             proc.terminate()
             try:
