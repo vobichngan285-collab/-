@@ -49,6 +49,33 @@ CRITICAL = (
 MODEL_REQUIRED = ("det.onnx", "rec.onnx", "dict.txt", "info.json")
 
 
+def patch_non_ocr_startup_validation(root: Path) -> None:
+    """Keep the author's OCR-DLL checks, omit checks for removed optional apps.
+
+    Original main.py calls checkintegrity() unconditionally. It insists on
+    Magpie.Core.exe, LunaHook*.dll and LunaSubProcess.exe even when disabled.
+    The original GPL source is bundled separately, unchanged. This narrow
+    compatibility adjustment changes only non-OCR startup requirements.
+    """
+    source = root / "LunaTranslator" / "myutils" / "config.py"
+    code = source.read_text(encoding="utf-8-sig")
+    function_at = code.index("def checkintegrity():")
+    cut_start = code.index("    dllshared = [", function_at)
+    cut_end = code.index("    collect = []", cut_start)
+    section = code[cut_start:cut_end]
+    for critical in ("LunaHost64.dll", "LunaHook64.dll",
+                     "LunaSubProcess64.exe", "Magpie.Core.exe"):
+        if critical not in section:
+            raise RuntimeError("Official integrity check structure unexpectedly changed: "+critical)
+    # All original DLL checks above, notably NativeUtils, CVUtils,
+    # onnxruntime and DirectML, remain intact. No OCR source is changed.
+    replacement = ("    # BlueStar OCR-only package: removed game Hook/Magpie/TTS apps.\\n"
+                   "    # Keep the original required OCR DLL checks above.\\n")
+    code = code[:cut_start] + replacement + code[cut_end:]
+    source.write_text(code, encoding="utf-8")
+    print("PASS: patched only ORIGINAL optional NON-OCR startup file check", flush=True)
+
+
 def prune(root: Path) -> dict:
     root = root.resolve()
     if root.name != "LunaTranslator_x64":
@@ -74,6 +101,8 @@ def prune(root: Path) -> dict:
         report["files_removed"] += count
         report["bytes_removed"] += size
         report["features"].append(reason + ":" + str(count))
+    patch_non_ocr_startup_validation(root)
+    report["features"].append("patched legacy startup check for disabled Magpie/Hook/TTS ONLY")
     for folder in CUT_DIRECTORIES:
         remove(root / folder, folder)
     for exe in CUT_EXECUTABLES:
