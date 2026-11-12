@@ -101,6 +101,16 @@ def main(root):
         if log_path.is_file():
             print("Original Luna stderr/stdout tail:\n",
                   log_path.read_bytes()[-16000:].decode("utf-8",errors="replace"),flush=True)
+        # The official GUI often reports missing optional modules in a Qt
+        # modal dialog instead of logging to stderr. Capture ONLY the
+        # disposable GitHub Windows runner desktop to find that blocker.
+        try:
+            from PIL import ImageGrab
+            shot=Path("trim_failure_desktop.png")
+            ImageGrab.grab(all_screens=True).save(shot)
+            print("Captured disposable CI desktop for diagnosis:",shot,flush=True)
+        except Exception as exc:
+            print("Windows diagnostic desktop not available:",repr(exc),flush=True)
         raise
     finally:
         logfile.close()
