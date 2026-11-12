@@ -15,6 +15,7 @@ DEFAULT_FILTER_SETTINGS = {
     "filter_english": True,
     "filter_numbers": True,
     "filter_symbols": True,
+    "filter_single_char": True,
     "similarity_enabled": True,
     "similarity_threshold": 2,
     "show_scan_frame": True,
@@ -29,6 +30,7 @@ def filter_speech_text(raw: str, settings: dict) -> str:
     english = bool(settings.get("filter_english", True))
     numbers = bool(settings.get("filter_numbers", True))
     symbols = bool(settings.get("filter_symbols", True))
+    single_char = bool(settings.get("filter_single_char", True))
     output: list[str] = []
     for line in str(raw).splitlines():
         chars = []
@@ -46,6 +48,9 @@ def filter_speech_text(raw: str, settings: dict) -> str:
         # Reject standalone punctuation/number/Latin-only result only when
         # the corresponding filters are actually selected.
         if cleaned:
+            # Drop only a standalone Chinese character OCR row.
+            if single_char and len(cleaned) == 1 and "\u4e00" <= cleaned <= "\u9fff":
+                continue
             output.append(cleaned)
     return "\n".join(output)
 
