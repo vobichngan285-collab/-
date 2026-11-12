@@ -373,6 +373,36 @@ jobs:
           }
           if (Test-Path 'dist/GameTextReader/models') { throw 'Abandoned OCR weights still bundled' }
           Write-Output 'PASS NO bundled RapidOCR/ONNX/OpenCV/NumPy or old OCR weights'
+      - name: Remove unused Luna translation, dictionaries, TTS, game Hook and legacy model
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = (Resolve-Path 'dist/GameTextReader/LunaOriginal/LunaTranslator_x64').Path
+          python -m py_compile 'experiments/luna_original_full/prune_original_luna.py' 'experiments/luna_original_full/smoke_trimmed_ocr.py'
+          if ($LASTEXITCODE -ne 0) { throw 'Slim build scripts contain syntax errors' }
+          python 'experiments/luna_original_full/prune_original_luna.py' $root
+          if ($LASTEXITCODE -ne 0) { throw 'Safe OCR-only pruning failed' }
+          if (Test-Path (Join-Path $root 'files/Magpie')) { throw 'Magpie was not removed' }
+          if (Test-Path (Join-Path $root 'files/LunaHook')) { throw 'Hook binaries were not removed' }
+          if (Test-Path (Join-Path $root 'files/ocrmodel')) { throw 'Default v5 model still present' }
+          if (Test-Path (Join-Path $root 'LunaTranslator/translator/google.py')) {
+            throw 'Translation provider was not removed'
+          }
+      - name: REAL Windows native OCR test AFTER author non-OCR modules are removed
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = (Resolve-Path 'dist/GameTextReader/LunaOriginal/LunaTranslator_x64').Path
+          python 'experiments/luna_original_full/smoke_trimmed_ocr.py' $root
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Original Luna OCR FAILED after trim: block release'
+          }
+          # Do not let an OCR-only release re-ship old dependency environments.
+          $internal = 'dist/GameTextReader/_internal'
+          foreach ($name in @('rapidocr','onnxruntime','cv2','numpy','models')) {
+            if (Test-Path (Join-Path $internal $name)) { throw "Found legacy model dependency: $name" }
+          }
+          Write-Output 'PASS AUTHOR OCR-ONLY BEHAVIOUR VERIFIED ON LIVE WINDOWS'
       - name: Verify bundled SAPI and WinRT voice API
         shell: pwsh
         run: |
@@ -490,7 +520,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory release -Force | Out-Null
-          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_FixedRegion_ThreeModes_Experimental_Windows_x64.zip -CompressionLevel Optimal -Force
+          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_LunaOCR_ONLY_Slim_Windows_x64.zip -CompressionLevel Optimal -Force
           $size = (Get-Item release/GameTextReader_FixedRegion_ThreeModes_Experimental_Windows_x64.zip).Length
           Write-Output "Portable archive size: $size bytes"
       - name: Prepare named Windows and source ZIPs for direct Actions artifact download
