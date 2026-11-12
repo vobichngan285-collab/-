@@ -154,7 +154,7 @@ jobs:
           $defaults['showintab'] = $false
           $defaults['ocr_translation_overlay'] = $false
           # Use the author's UNMODIFIED getresauto() PERIOD branch.
-          # Exact 300 ms between eligible full OCR calls after last OCR.
+          # User's exact 400 ms between eligible full OCR calls after last OCR.
           $defaults['ocr_auto_method_v2'] = 'period'
           $defaults['ocr_interval'] = 0.4
           $defaults['multiregion'] = $true
@@ -274,6 +274,77 @@ jobs:
           } finally {
             if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
           }
+      - name: Validate OFFICIAL PP-OCRv6_small + matching dictionary on Windows CPU fallback
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # GitHub's hosted Windows VM has no guaranteed physical GPU.
+          # Verify original upstream v6 model and original inference with GPU
+          # temporarily off, then restore the user's GPU=true settings.
+          $cwd = (Resolve-Path 'dist/GameTextReader/LunaOriginal/LunaTranslator_x64').Path
+          $cfgPath = Join-Path $cwd 'userconfig_bluestar/ocrsetting.json'
+          $original = Get-Content $cfgPath -Raw -Encoding UTF8
+          $saved = $original | ConvertFrom-Json -AsHashtable
+          if (-not $saved['local']['args']['gpu'] -or
+              $saved['local']['args']['model'] -ne 'PP-OCRv6_small') {
+            throw "User's actual GPU/model config missing before CPU-only diagnostic"
+          }
+          try {
+            $cpu = $original | ConvertFrom-Json -AsHashtable
+            $cpu['local']['args']['gpu'] = $false
+            ($cpu | ConvertTo-Json -Depth 100) | Set-Content $cfgPath -Encoding UTF8
+            $exe = Join-Path $cwd 'LunaTranslator.exe'
+            $proc = Start-Process -FilePath $exe -WorkingDirectory $cwd -ArgumentList @('--userconfig', 'userconfig_bluestar') -PassThru
+            try {
+              @'
+          import json, socket, time
+          deadline=time.monotonic()+32
+          while time.monotonic()<deadline:
+              try:
+                  with socket.create_connection(('127.0.0.1',29380),timeout=1.1) as s:
+                      s.settimeout(28)
+                      s.sendall(b'{"action":"status"}\n')
+                      response=b''
+                      while b'\n' not in response:
+                          part=s.recv(8192)
+                          if not part: break
+                          response+=part
+                      state=json.loads(response.split(b'\n')[0])
+                      assert state['ok'],state
+                      assert state['status']['model']=='PP-OCRv6_small',state
+                      assert state['status']['gpu_requested'] is False,state
+                  break
+              except (ConnectionRefusedError, ConnectionResetError, OSError):
+                  time.sleep(.2)
+          else:
+              raise AssertionError("Original Luna CPU-only diagnostic process did not launch")
+          with socket.create_connection(('127.0.0.1',29380),timeout=2) as s:
+              s.settimeout(35)
+              s.sendall(b'{"action":"ocr","box":[50,50,550,320]}\n')
+              response=b''
+              while b'\n' not in response:
+                  part=s.recv(65536)
+                  if not part: break
+                  response+=part
+              data=json.loads(response.split(b'\n')[0])
+              assert data['ok'],("OFFICIAL v6 Small model failed to load/infer on CPU",data)
+              assert isinstance(data.get('result'),dict),data
+              assert isinstance(data['result'].get('results'),list),data
+              print('PASS real upstream PP-OCRv6_small model+dict on CPU',len(data['result']['results']))
+              print('GPU acceleration was NOT certified on hosted runner; only user's GPU flag is preserved')
+          '@ | python -
+              if ($LASTEXITCODE -ne 0) { throw 'Original v6 Small ONNX+dict inference failed on CPU fallback' }
+            } finally {
+              if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+            }
+          } finally {
+            [System.IO.File]::WriteAllText($cfgPath, $original, (New-Object System.Text.UTF8Encoding($false)))
+          }
+          $restored = Get-Content $cfgPath -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ($restored.local.args.gpu -ne $true -or $restored.local.args.model -ne 'PP-OCRv6_small') {
+            throw "GPU=true user configuration not restored before packaging"
+          }
+          Write-Output 'PASS exact original user GPU configuration restored and will ship'
       - name: Remove duplicated RapidOCR model weights
         shell: pwsh
         run: |
