@@ -13,7 +13,11 @@ on:
       - 'experiments/luna_original_full/**'
       - '.github/workflows/build-windows-luna-original.yml'
 permissions:
-  contents: write
+  contents: read
+# Only the latest new isolated experimental commit should build.
+concurrency:
+  group: luna-ocr-only-slim-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   portable:
