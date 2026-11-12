@@ -613,3 +613,11 @@ jobs:
           # failed or invent a release URL when token permissions are read-only.
           Write-Output 'PASS verified named downloadable Actions artifact; release upload unavailable to GitHub Actions token (HTTP 403).'
           Write-Output "To download, open this successful workflow run -> Artifacts -> BlueStarOCR-Luna-OCR-ONLY-SLIM-Windows."
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: LunaOCRtrim-CI-desktop-diagnostic
+          path: trim_failure_desktop.png
+          if-no-files-found: warn
+          retention-days: 3
