@@ -1,5 +1,18 @@
 # Windows 游戏文字助手｜当前交接（2026-11-10 · 区域跟踪实验版）
 
+## 最新进展｜2026-11-12 Blue Star OCR 游戏文字朗读：逐行框选 + 原版 HWND 截图（已发布，待用户真机验收）
+
+- **最高优先级：** 仅 Windows 11 GameTextReader / Blue Star OCR；安卓蓝星向导仍暂缓。只使用原 GitHub 仓库 `vobichngan285-collab/-`，旧版本、主程序和旧 Release 全部保留，不覆盖原包；不要把未通过测试的第二阶段精简版当成可用包。
+- **发现两层框合并：** 官方 LunaTranslator v12.1.3.9 的 `OCRResult.parse()` 在 `globalconfig['ocrmergelines'] = True` 时由 `__nearmergeboxs` 将相邻文字块合成大区域；蓝星 `app.py` 的 `build_reading_regions(lines)` 再把长行合并，导致鼠标命中整段。最新将原版启动配置 `ocrmergelines=false`，蓝星 F8 指向模式 `keep_detected_rows(lines)` 只排序、不合并、不修改识别字符，测试能按三个独立行框分别命中。用户游戏内视觉实测仍待验收。
+- **游戏窗口截图修复：** 原版 `ocrtext.py` 提供 `imageCutEx(hwnd, QRect)`，此前蓝星 IPC 插件却固定传入 `None`，忽略已有稳定绑定的游戏 HWND。现在 F8 从 `GameWindowBinding` 传入绑定 HWND，经 `LunaOriginalOCR.recognize_box(box, hwnd=...)`、loopback IPC 到原版 `imageCutEx(hwnd,...)`；保留作者原实现的 GDI优先/桌面回退，不另写OCR/截图算法。
+- **持续识别：** 将原版 `ocr_text_diff` 从 5 调整到 1，让单字符菜单变化能触发重新朗读；仍保留 400ms 原版 period 门控、PP-OCRv6_small 官方 DET/REC/字典、4 CPU 线程/用户GPU请求设置、原版 Qt 区域与 F7、按键、朗读、UIA。
+- **严格排除有故障的第二轮精简：** 第二阶段 `refactor/windows-luna-ocr-only-slim-20261112` HEAD `0ecdbfc56487f56f00bf35cdba9a537cfbff2437` 的 GitHub Actions `43148397909` 删除 248 文件后 Luna 本地 IPC 35 秒超时，**未经修好，不可发布**。本次从之前构建成功的第一阶段精简提交 `a24701d4cbddfd5991c1f5fc457b9848d6ba57f1` 单独派生修复分支；不执行第二阶段不稳定删除脚本，旧失效分支保持原样。打包仍不会带 RapidOCR/旧 ONNX 模型及依赖。
+- **修复分支和提交：** `fix/windows-luna-ocr-row-boxes-20261112`；首个修复 Commit `b99326b6c3ef8f04a111055a88b6064085ae1e92`；当前成功编译源码 HEAD `9390cb90369230d6aaa3e4f5e24ef5ed5fa4be15`（后一提交修正与新参数冲突的旧测试断言）。没有修改原安卓仓库、没有覆盖早期成功发布。
+- **Windows Actions：** [43157171894](https://github.com/vobichngan285-collab/-/actions/runs/43157171894) `completed/success`，`135 passed / 1 warning`；原版完整进程、loopback IPC、隐藏 Qt 窗口、`ocrmergelines=False` 与 `ocr_text_diff=1` 已在真实 Windows runner 加载；CPU fallback 用官方 PP-OCRv6_small+匹配字典真实推理得到 2 OCR 结果；SAPI/WinRT、UIA、冻结 EXE 启动、三次框选、ZIP 全1842文件读取验证通过。**runner 不能代替用户实际《七日杀》窗口/DC、显卡和音频体验**。
+- **已公开 GitHub Release（单层 ZIP、可直接复制到浏览器）：** https://github.com/vobichngan285-collab/-/releases/tag/win-luna-rowboxes-hwnd-20261112 。Windows 绿色版 129139522 bytes，SHA256 `bedc84e901362d336bb0b6f33149ca6b91ddfb2f796b324a1c52da36363b1424`；**直接下载** https://github.com/vobichngan285-collab/-/releases/download/win-luna-rowboxes-hwnd-20261112/BlueStarOCR_LunaRowBoxes_Windows_x64.zip 。附源码 ZIP 167302 bytes, SHA256 `d5bb4ad9340043495954a6fa70fa4fbefbff41cb20762f71692a40d4026bd00d`。公开 Actions 备用 artifact `13915739301` 名称 `BlueStarOCR-Luna-RowBoxes-Windows`。
+- **安装及验收：** 新目录解压，启动 `GameTextReader.exe`，不要覆盖旧版本或用户私有 `config..json`。主要真机验收 F8 《七日杀》开始游戏前后截图是否抓到当前文字、绿框是否每行独立且鼠标逐行读、少字菜单识别率/速度、F11/F7、音频发声与 Windows 无障碍；遇到真实识别错误只收无图片/无密钥的诊断，不凭云端 CI 臆称真实准确率全面解决。
+
+
 ## 最新进展｜2026-11-10 Windows GameTextReader 最新版无法解压：原 EXE 无损双格式重新打包（已发布）
 
 - **用户实际反馈：** 用户重新切回**电脑 Windows 11 截图 OCR + 鼠标指向朗读**工具，报告目前最新的**游戏 HWND 固定绑定版** ZIP 在用户电脑上“无法解压”，要求重新制作下载包。不可混同安卓 Blue Star Guide。原先 Release ZIP 源文件本身通过 CRC，所以原因**未定位**，不能凭此断言程序损坏；需要兼容 Windows 自带解压并提供备用格式。
