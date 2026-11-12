@@ -45,12 +45,24 @@ class _ChangeRegion:
                     from qtsymbols import QRect
                     action = payload["action"]
                     if action == "status":
-                        from myutils.config import globalconfig
+                        from myutils.config import globalconfig, ocrsetting
+                        # Report what Luna actually loaded, not just ZIP defaults.
+                        local = ocrsetting.get("local", {}).get("args", {})
+                        from CVUtils import OcrIsProviderAvailable
+                        dml_available = bool(OcrIsProviderAvailable("DML"))
                         ui = getattr(gobject.base, "translation_ui", None)
                         source = getattr(gobject.base, "textsource", None)
                         payload["details"] = {
                             "strategy": globalconfig.get("ocr_auto_method_v2", "period"),
                             "interval_s": globalconfig.get("ocr_interval", 1.5),
+                            "model": local.get("model"),
+                            "threads": local.get("thread"),
+                            "gpu_requested": local.get("gpu"),
+                            "gpu_luid": local.get("luid"),
+                            "device_type": local.get("device_type"),
+                            "dml_provider_available": dml_available,
+                            "multiregion": globalconfig.get("multiregion"),
+                            "ocr_text_diff": globalconfig.get("ocr_text_diff"),
                             "main_window_hidden": bool(ui and ui.isHidden()),
                             "source": type(source).__name__ if source is not None else None,
                             "original_region_count": len(getattr(source, "ranges", [])),
