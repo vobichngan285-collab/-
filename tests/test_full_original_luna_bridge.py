@@ -89,7 +89,8 @@ def test_original_hud_does_not_reappear_when_f7_shows_blue_star_frame():
     assert "$defaults['ocr_auto_method_v2'] = 'period'" in workflow
     assert "$defaults['ocr_interval'] = 0.4" in workflow
     assert "$defaults['multiregion'] = $true" in workflow
-    assert "$defaults['ocr_text_diff'] = 5" in workflow
+    assert "$defaults['ocr_text_diff'] = 1" in workflow
+    assert "$defaults['ocrmergelines'] = $false" in workflow
     assert "install_official_v6small.py" in workflow
     assert "'model'] = 'PP-OCRv6_small'" in workflow
     assert "'gpu'] = $true" in workflow
