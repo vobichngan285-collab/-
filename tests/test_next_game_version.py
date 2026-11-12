@@ -12,7 +12,6 @@ from game_reader.hover_modes import (
     hotkey_label, sanitize_hotkeys, valid_hotkey
 )
 from game_reader.mouse_input import WheelAccumulator
-from game_reader.luna_capture import capture_rect
 
 
 def test_wheel_is_an_event_not_a_virtual_key_and_middle_is_a_real_key():
@@ -112,18 +111,11 @@ def test_hover_clear_pauses_scan_until_mode_reentered():
     assert app._hover_next_due == float("inf")
 
 
-def test_luna_hwnd_first_and_desktop_fallback_keep_exact_pixels(monkeypatch):
-    import game_reader.luna_capture as capture
+def test_mouse_ocr_reads_exact_small_bbox(monkeypatch):
+    from game_reader import win_screen
     box = (100, 120, 350, 210)
-    valid = Image.new("RGB", (250, 90), "#335577")
-    calls = []
-    monkeypatch.setattr(capture, "_gdi_window_box",
-                        lambda hwnd, rect: calls.append(("hwnd", hwnd)) or valid)
-    monkeypatch.setattr(capture.ImageGrab, "grab",
-                        lambda **kwargs: calls.append(("fallback", kwargs)) or valid)
-    assert capture_rect(box, hwnd=123).size == (250, 90)
-    assert calls == [("hwnd", 123)]
-    calls.clear()
-    monkeypatch.setattr(capture, "_gdi_window_box", lambda hwnd, rect: None)
-    assert capture_rect(box, hwnd=123).size == (250, 90)
-    assert calls == [("fallback", {"bbox": box, "all_screens": True})]
+    seen = []
+    monkeypatch.setattr(win_screen.ImageGrab, "grab",
+                        lambda **kw: seen.append(kw) or Image.new("RGB",(250,90)))
+    assert win_screen.grab_game_rect(box).size == (250,90)
+    assert seen == [{"bbox":box,"all_screens":True}]
