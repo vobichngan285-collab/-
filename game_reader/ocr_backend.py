@@ -71,7 +71,7 @@ class LocalOCR:
                 raise FileNotFoundError(f"缺少或损坏的离线 OCR 文件：{path}")
         self.gpu_available = "DmlExecutionProvider" in ort.get_available_providers()
         use_dml = self.gpu_requested and self.gpu_available
-        engine = RapidOCR(params={
+        params = {
             "Det.engine_type": EngineType.ONNXRUNTIME,
             "Rec.engine_type": EngineType.ONNXRUNTIME,
             "Det.ocr_version": OCRVersion.PPOCRV6,
@@ -83,10 +83,27 @@ class LocalOCR:
             "EngineConfig.onnxruntime.intra_op_num_threads": self.threads,
             "EngineConfig.onnxruntime.inter_op_num_threads": 1,
             "EngineConfig.onnxruntime.use_dml": use_dml,
-        })
+        }
         probe = Image.new("RGB", (512, 128), "white")
         ImageDraw.Draw(probe).text((24, 40), "READY", fill="black")
-        engine(probe, use_cls=False)
+        def create_and_warm(dml):
+            options = dict(params)
+            options["EngineConfig.onnxruntime.use_dml"] = dml
+            instance = RapidOCR(params=options)
+            instance(probe, use_cls=False)
+            return instance
+        self.gpu_fallback_error = ""
+        try:
+            engine = create_and_warm(use_dml)
+        except Exception as exc:
+            if not use_dml:
+                raise
+            # Some machines advertise DML but cannot actually initialize
+            # a session. Fall back ONCE during startup, never per screenshot.
+            self.gpu_fallback_error = type(exc).__name__
+            engine = create_and_warm(False)
+            use_dml = False
+        self.gpu_active = use_dml
         self.engine = engine
         self.loaded_tier = tier
 

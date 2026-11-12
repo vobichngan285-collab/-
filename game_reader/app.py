@@ -210,7 +210,8 @@ class ReaderApp:
                 with self._ocr_lock:
                     self.ocr_worker.prepare("small")
                 self.events.put(("ocr_ready", self.ocr_worker.gpu_requested,
-                                 self.ocr_worker.gpu_available))
+                                 self.ocr_worker.gpu_available,
+                                 self.ocr_worker.gpu_active))
             except Exception:
                 self.events.put(("ocr_init_fail", traceback.format_exc()))
         threading.Thread(target=work, daemon=True, name="OCR-Startup-Once").start()
@@ -569,7 +570,7 @@ class ReaderApp:
 
         footer = ttk.Frame(self.root, padding=(22, 10, 22, 14))
         footer.pack(side="bottom", fill="x")
-        self.status_var = tk.StringVar(value="就绪。F9 切换工作模式，F11 可调整扫描宽高。")
+        self.status_var = tk.StringVar(value="OCR 正在启动预热；完成后可立即切换三个识别模式。")
         self.status_label = ttk.Label(
             footer, textvariable=self.status_var, style="Muted.TLabel",
             wraplength=1000)
@@ -1645,11 +1646,13 @@ class ReaderApp:
                 event = self.events.get_nowait()
                 kind = event[0]
                 if kind == "ocr_ready":
-                    _, wanted_gpu, available_gpu = event
-                    if wanted_gpu and not available_gpu:
-                        self.status("OCR 已预热；本机没有 DirectML 提供程序，使用 CPU。")
+                    _, wanted_gpu, available_gpu, active_gpu = event
+                    if wanted_gpu and not active_gpu:
+                        self.status("OCR 已预热；GPU 未能启用，已自动使用 CPU。")
+                    elif active_gpu:
+                        self.status("OCR 已预热，已请求 DirectML GPU 推理。")
                     else:
-                        self.status("OCR 已预热，三个模式共享同一常驻模型。")
+                        self.status("OCR 已预热，三个模式共享同一常驻 CPU 模型。")
                 elif kind == "ocr_init_fail":
                     self._ocr_init_error = event[1]
                     self.last_ocr_error = event[1]

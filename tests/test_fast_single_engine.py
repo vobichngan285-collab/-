@@ -63,3 +63,30 @@ def test_no_dml_provider_means_cpu_not_crash(monkeypatch,tmp_path):
     engine.prepare()
     assert engine.gpu_available is False
     assert config[0]["EngineConfig.onnxruntime.use_dml"] is False
+
+
+def test_dml_session_load_failure_falls_back_before_ready(monkeypatch, tmp_path):
+    import sys
+    import types
+    import game_reader.ocr_backend as b
+    for name in ("PP-OCRv6_det_small.onnx", "PP-OCRv6_rec_small.onnx"):
+        (tmp_path / name).write_bytes(b"x" * 100001)
+    monkeypatch.setattr(b, "model_root", lambda: tmp_path)
+    params_seen = []
+    class FakeRapid:
+        def __init__(self, params):
+            params_seen.append(params)
+            if params["EngineConfig.onnxruntime.use_dml"]:
+                raise RuntimeError("mock GPU is busy")
+        def __call__(self, *args, **kwargs):
+            return None
+    enum = types.SimpleNamespace(ONNXRUNTIME="onnx", PPOCRV6="v6", SMALL="small")
+    monkeypatch.setitem(sys.modules, "rapidocr", types.SimpleNamespace(
+        RapidOCR=FakeRapid, ModelType=enum, EngineType=enum, OCRVersion=enum))
+    monkeypatch.setitem(sys.modules, "onnxruntime", types.SimpleNamespace(
+        get_available_providers=lambda: ["DmlExecutionProvider", "CPUExecutionProvider"]))
+    engine = LocalOCR(4, gpu=True)
+    engine.prepare()
+    assert [item["EngineConfig.onnxruntime.use_dml"] for item in params_seen] == [True, False]
+    assert engine.loaded_tier == "small" and not engine.gpu_active
+    assert engine.gpu_fallback_error == "RuntimeError"
