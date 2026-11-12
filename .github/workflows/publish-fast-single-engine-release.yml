@@ -1,0 +1,34 @@
+name: Publish Blue Star Fast Single Engine direct ZIP
+on:
+  push:
+    branches: ['refactor/windows-fast-single-engine-20261112']
+    paths: ['.github/workflows/publish-fast-single-engine-release.yml']
+permissions:
+  actions: read
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download the already tested Windows ZIP from successful run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release
+          gh run download 43247400119 --repo ${{ github.repository }} --name BlueStarOCR-FastSingleEngine-Windows --dir release
+          ls -lh release/
+          test -f release/BlueStarOCR_FastSingleEngine_Windows_x64.zip
+          test -f release/BlueStarOCR_FastSingleEngine_Source.zip
+      - name: Verify byte-exact tested artifact
+        run: |
+          cd release
+          echo "1769d480d85bf5771e8d78e5588a70697b4bd226f26eb14205e2d9b0e42deedb  BlueStarOCR_FastSingleEngine_Windows_x64.zip" | sha256sum -c -
+          echo "ff41a4b6b3670b6b43a1dd63555266c2e5efb09cc56cd9deb422566776aaec28  BlueStarOCR_FastSingleEngine_Source.zip" | sha256sum -c -
+          unzip -t BlueStarOCR_FastSingleEngine_Windows_x64.zip | tail -n 1
+      - name: Create permanent browser-direct GitHub Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=win-fast-single-engine-20261112
+          gh release create "$tag" release/BlueStarOCR_FastSingleEngine_Windows_x64.zip release/BlueStarOCR_FastSingleEngine_Source.zip --repo ${{ github.repository }} --target 09c93b1b5653cbf476226de53d954619ea843f0b --prerelease --title "Blue Star OCR - Fast Single Engine (Windows experimental)" --notes "PP-OCRv6 Small single warm engine, CPU 2/4/6 threads and optional DirectML. Windows CI: 124 tests passed; frozen OCR/TTS/UI/picker/startup passed. Game CPU/FPS must be tested on user's PC. Release contains voice helper for Microsoft voices; no private config bundled. Do not overwrite old versions."
+          gh release view "$tag" --repo ${{ github.repository }} --json assets,url,isDraft
