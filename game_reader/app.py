@@ -37,7 +37,6 @@ from .hover_modes import (MOUSE_SIDE_VKS, MOUSE_BUTTON_VKS, WHEEL_DOWN,
 from .mouse_input import MouseWheelListener
 from .region_picker import ScreenRegionPicker
 from .foreground import foreground_class, foreground_window_id
-from .game_window import GameWindowBinding
 from .hover_target import centered_region
 from .fixed_region import (parse_fixed_region, parse_monitor, region_on_same_monitor,
                            screenshot_fingerprint, frame_has_changed,
@@ -61,6 +60,7 @@ DEFAULTS = {"vk": 0x77, "hotkey_label": "F8",
             "success_cue": True,
             "tier": "small", "voice": "", "rate": 0,
             "volume": 100, "dwell_ms": 0, "luna_config": "",
+            "ocr_threads": 2, "ocr_gpu": False,
             **DEFAULT_FILTER_SETTINGS}
 RESULT_TTL_SECONDS = 60.0
 FRAME_COLORS = {"绿色": "#42DD9C", "蓝色": "#38A8FF", "黄色": "#FFD34D",
@@ -98,6 +98,8 @@ def read_settings() -> dict:
     settings["frame_color"] = display_color(settings["frame_color"])
     settings["frame_thickness"] = parse_thickness(settings["frame_thickness"])
     settings["tier"] = "small"
+    settings["ocr_threads"] = settings["ocr_threads"] if type(settings["ocr_threads"]) is int and settings["ocr_threads"] in (2, 4, 6) else 2
+    settings["ocr_gpu"] = bool(settings["ocr_gpu"])
     settings["dwell_ms"] = 0
     try:
         settings["similarity_threshold"] = similarity_threshold(
@@ -134,8 +136,8 @@ class ReaderApp:
         self.events: Queue[tuple] = Queue()
         self.lines: list[OCRLine] = []
         self._full_capture_window = None
-        self._game_window = GameWindowBinding()
-        self.ocr_worker = LocalOCR()
+        self.ocr_worker = LocalOCR(self.settings["ocr_threads"], self.settings["ocr_gpu"])
+        self._ocr_init_error = ""
         self.busy = False
         self.closed = False
         self.capture_id = 0
@@ -197,8 +199,21 @@ class ReaderApp:
         self.create_widgets()
         self.enable_accessibility()
         self.scan_voices()
+        self._warm_ocr()
         self.root.after(15, self.poll_input)
         self.root.after(15, self.poll_messages)
+
+    def _warm_ocr(self):
+        """Once at startup, before all three modes share the same ONNX model."""
+        def work():
+            try:
+                with self._ocr_lock:
+                    self.ocr_worker.prepare("small")
+                self.events.put(("ocr_ready", self.ocr_worker.gpu_requested,
+                                 self.ocr_worker.gpu_available))
+            except Exception:
+                self.events.put(("ocr_init_fail", traceback.format_exc()))
+        threading.Thread(target=work, daemon=True, name="OCR-Startup-Once").start()
 
     def create_widgets(self):
         """Large-print, native-widget settings UI.
@@ -499,11 +514,27 @@ class ReaderApp:
             cue_row, text="试听叮声", command=self.test_cue)
         self.test_cue_button.pack(side="left", padx=(20, 0))
 
+        performance = section(fullscreen, "OCR 性能（修改后重新启动生效）")
+        perf_row = row(performance)
+        card_label(perf_row, "CPU 推理线程").pack(side="left")
+        self.ocr_threads_var = tk.StringVar(value=str(self.settings["ocr_threads"]))
+        self.ocr_threads_select = ttk.Combobox(
+            perf_row, width=7, state="readonly", values=("2", "4", "6"),
+            textvariable=self.ocr_threads_var)
+        self.ocr_threads_select.pack(side="left", padx=(12, 12))
+        self.ocr_threads_select.bind("<<ComboboxSelected>>", self.save_ocr_preferences)
+        self.ocr_gpu_var = tk.BooleanVar(value=self.settings["ocr_gpu"])
+        self.ocr_gpu_check = ttk.Checkbutton(
+            performance, text="GPU 加速（DirectML，不可用时回退 CPU）",
+            variable=self.ocr_gpu_var, command=self.save_ocr_preferences)
+        self.ocr_gpu_check.pack(anchor="w", pady=7)
+
         filtering = self._pages["filters"]
         filter_frame = section(filtering, "朗读内容过滤")
         self.filter_english_var = tk.BooleanVar(value=self.settings["filter_english"])
         self.filter_numbers_var = tk.BooleanVar(value=self.settings["filter_numbers"])
         self.filter_symbols_var = tk.BooleanVar(value=self.settings["filter_symbols"])
+        self.filter_single_char_var = tk.BooleanVar(value=self.settings["filter_single_char"])
         self.filter_english_check = ttk.Checkbutton(
             filter_frame, text="过滤英文（例如 DLSS、Press）",
             variable=self.filter_english_var, command=self.save_visual_settings)
@@ -516,6 +547,10 @@ class ReaderApp:
             filter_frame, text="过滤符号（例如 +、% 、★）",
             variable=self.filter_symbols_var, command=self.save_visual_settings)
         self.filter_symbols_check.pack(anchor="w", pady=8)
+        self.filter_single_char_check = ttk.Checkbutton(
+            filter_frame, text="过滤单字（单独一个汉字不朗读）",
+            variable=self.filter_single_char_var, command=self.save_visual_settings)
+        self.filter_single_char_check.pack(anchor="w", pady=8)
 
         general = self._pages["general"]
         tools = section(general, "常用工具")
@@ -530,7 +565,7 @@ class ReaderApp:
 
         about = self._pages["about"]
         details = section(about, "Blue Star OCR")
-        note(details, "Windows 11 · V1.2.1 · PP-OCRv6 Small")
+        note(details, "Windows 11 · 单引擎快速版 · PP-OCRv6 Small")
 
         footer = ttk.Frame(self.root, padding=(22, 10, 22, 14))
         footer.pack(side="bottom", fill="x")
@@ -661,6 +696,15 @@ class ReaderApp:
         self.update_scan_frame()
         self.status("区域框已显示。" if self._region_border_visible else "区域框已隐藏。")
 
+    def save_ocr_preferences(self, _event=None):
+        threads = int(self.ocr_threads_var.get())
+        if threads not in (2, 4, 6):
+            return
+        self.settings["ocr_threads"] = threads
+        self.settings["ocr_gpu"] = bool(self.ocr_gpu_var.get())
+        self.persist()
+        self.status("性能设置已保存；重新启动蓝星后生效，不会在切换模式时重新加载。")
+
     def save_visual_settings(self):
         for name, variable in (
             ("show_scan_frame", self.show_frame_var),
@@ -670,6 +714,7 @@ class ReaderApp:
             ("filter_english", self.filter_english_var),
             ("filter_numbers", self.filter_numbers_var),
             ("filter_symbols", self.filter_symbols_var),
+            ("filter_single_char", self.filter_single_char_var),
         ):
             self.settings[name] = bool(variable.get())
         if hasattr(self, "frame_enabled_var"):
@@ -777,6 +822,7 @@ class ReaderApp:
                 (self.filter_english_check, "过滤英文字母，开关"),
                 (self.filter_numbers_check, "过滤数字，开关"),
                 (self.filter_symbols_check, "过滤符号，开关"),
+                (self.filter_single_char_check, "过滤独立单字，开关"),
                 (self.output, "最近一次 OCR 识别结果，原文"),
                 (self.status_label, "当前工作模式和 OCR 状态"),
             ]
@@ -913,15 +959,11 @@ class ReaderApp:
         self.status(f"悬停 OCR 周期已设为 {period} 毫秒。")
 
     def _game_capture_target(self):
-        """Pin HWND once, like LunaTranslator ocrtext.hwndChanged()."""
-        binding = getattr(self, "_game_window", None)
-        return binding.target() if binding is not None else 0
+        """Capture the NOW-foreground window, not a pinned game guess."""
+        return foreground_window_id()
 
     def _game_capture_active(self, captured_hwnd=None):
-        """Game-owned child windows are not treated as leaving the game."""
-        binding = getattr(self, "_game_window", None)
-        if binding is not None and binding.hwnd:
-            return binding.is_active()
+        """Do not speak stale boxes over another foreground window."""
         return not captured_hwnd or foreground_window_id() == captured_hwnd
 
     def select_region(self):
@@ -1035,7 +1077,6 @@ class ReaderApp:
             self._region_last_fingerprint = None
             self._region_last_text = ""
             self._region_prev_lines = []
-            self._region_border_visible = bool(self.settings.get("show_scan_frame", True))
             self.region_preview_var.set(self.format_fixed_region())
             self.persist()
             # The app must not cover the selected game pixels after F11.
@@ -1130,8 +1171,7 @@ class ReaderApp:
         if desired == "hover":
             self._hover_scan_paused = False
             self.mouse_mode_var.set("当前：鼠标跟随模式（局部 OCR）")
-            self._hover_next_due = max(time.monotonic() + 0.35,
-                                       self._mode_announcement_until)
+            self._hover_next_due = time.monotonic()
             if self.root.state() == "normal":
                 self.root.iconify()
             self.status("已进入鼠标跟随模式。")
@@ -1139,8 +1179,7 @@ class ReaderApp:
                 self.speak_selected("鼠标跟随模式")
         elif desired == "region":
             self.mouse_mode_var.set("当前：区域跟踪模式")
-            self._region_border_visible = bool(self.settings.get("show_scan_frame", True))
-            self._region_next_due = time.monotonic() + 0.18
+            self._region_next_due = time.monotonic()
             if self.root.state() == "normal":
                 self.root.iconify()
             box = parse_fixed_region(self.settings.get("fixed_region"),
@@ -1605,7 +1644,17 @@ class ReaderApp:
             while True:
                 event = self.events.get_nowait()
                 kind = event[0]
-                if kind == "ocr_ok":
+                if kind == "ocr_ready":
+                    _, wanted_gpu, available_gpu = event
+                    if wanted_gpu and not available_gpu:
+                        self.status("OCR 已预热；本机没有 DirectML 提供程序，使用 CPU。")
+                    else:
+                        self.status("OCR 已预热，三个模式共享同一常驻模型。")
+                elif kind == "ocr_init_fail":
+                    self._ocr_init_error = event[1]
+                    self.last_ocr_error = event[1]
+                    self.status("OCR 预热失败：请点击「复制失败诊断」。")
+                elif kind == "ocr_ok":
                     _, capture_id, lines, milliseconds, focus, *extra = event
                     if capture_id != self.capture_id:
                         continue
@@ -1877,7 +1926,7 @@ class ReaderApp:
                         self._hover_spoken_cursor = None
                         self._hover_last_text = ""
                 if (not self.busy and time.monotonic() >= self._hover_next_due
-                        and time.monotonic() >= self._mode_announcement_until):
+):
                     self.start_hover_ocr(manual=False)
             elif self.mouse_mode == "region":
                 self.update_scan_frame()
