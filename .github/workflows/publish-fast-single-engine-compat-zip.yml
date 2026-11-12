@@ -1,0 +1,65 @@
+name: Verify and publish Windows Explorer compatibility ZIP
+on:
+  push:
+    branches: ['refactor/windows-fast-single-engine-20261112']
+    paths: ['.github/workflows/publish-fast-single-engine-compat-zip.yml']
+permissions:
+  contents: write
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Download byte-exact original released binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release
+          gh release download win-fast-single-engine-20261112 --repo "${{ github.repository }}" --pattern 'BlueStarOCR_FastSingleEngine_Windows_x64.zip' --dir release
+          echo '1769d480d85bf5771e8d78e5588a70697b4bd226f26eb14205e2d9b0e42deedb  release/BlueStarOCR_FastSingleEngine_Windows_x64.zip' | sha256sum -c -
+      - name: Repack with Windows Explorer most basic ZIP STORED method
+        shell: bash
+        run: |
+          cat > "${{ runner.temp }}/repack.py" <<'PY'
+          from zipfile import ZipFile, ZipInfo, ZIP_STORED
+          from pathlib import Path
+          from shutil import copyfileobj
+          src=Path('release/BlueStarOCR_FastSingleEngine_Windows_x64.zip')
+          dst=Path('release/BlueStarOCR_FastSingleEngine_Windows_ExplorerCompatible.zip')
+          with ZipFile(src,'r') as inp, ZipFile(dst,'w',allowZip64=True) as out:
+              for info in inp.infolist():
+                  target=ZipInfo(info.filename,date_time=info.date_time)
+                  target.compress_type=ZIP_STORED
+                  target.create_system=0
+                  target.external_attr=info.external_attr
+                  if info.is_dir():
+                      out.writestr(target,b'')
+                  else:
+                      with inp.open(info,'r') as reader, out.open(target,'w') as writer:
+                          copyfileobj(reader,writer,1024*1024)
+          with ZipFile(src) as original, ZipFile(dst) as compat:
+              assert original.namelist()==compat.namelist(), 'different file list'
+              assert original.testzip() is None, 'original ZIP has corrupted entry'
+              assert compat.testzip() is None, 'compat ZIP has corrupted entry'
+              assert all(i.compress_type==ZIP_STORED for i in compat.infolist()), 'not pure STORE format'
+              assert len(compat.namelist())==1190
+              must_have=('GameTextReader/GameTextReader.exe',
+                         'GameTextReader/LunaSubprocess64.exe',
+                         'GameTextReader/_internal/models/PP-OCRv6_det_small.onnx',
+                         'GameTextReader/_internal/models/PP-OCRv6_rec_small.onnx')
+              assert all(name in compat.namelist() for name in must_have)
+              for a,b in zip(original.infolist(),compat.infolist()):
+                  assert a.CRC==b.CRC and a.file_size==b.file_size and a.filename==b.filename
+          print('COMPAT PASS: all 1190 source files identical by CRC, size and order')
+          print('COMPAT size bytes:',dst.stat().st_size)
+          PY
+          python "${{ runner.temp }}/repack.py"
+          unzip -t release/BlueStarOCR_FastSingleEngine_Windows_ExplorerCompatible.zip | tail -n 1
+          sha256sum release/BlueStarOCR_FastSingleEngine_Windows_ExplorerCompatible.zip
+      - name: Upload separate new compatibility file on original Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release upload win-fast-single-engine-20261112 release/BlueStarOCR_FastSingleEngine_Windows_ExplorerCompatible.zip --repo "${{ github.repository }}"
+          gh release view win-fast-single-engine-20261112 --repo "${{ github.repository }}" --json assets,url
