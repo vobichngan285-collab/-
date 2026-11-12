@@ -4,40 +4,6 @@ import multiprocessing
 import sys
 
 
-def packaged_ocr_selftest() -> int:
-    """Run *the frozen executable* through the original V1.2 Small OCR model, no Tk window."""
-    import os
-    import tempfile
-    import traceback
-    from pathlib import Path
-
-    log_path = Path(tempfile.gettempdir()) / "GameTextReader_ocr_selftest.txt"
-    try:
-        from PIL import Image, ImageDraw, ImageFont
-        from game_reader.ocr_backend import LocalOCR
-        os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "1"
-        im = Image.new("RGB", (1400, 440), "white")
-        draw = ImageDraw.Draw(im)
-        font_path = "C:/Windows/Fonts/arialbd.ttf"
-        font = ImageFont.truetype(font_path, 100)
-        draw.text((75, 55), "CONTINUE GAME", fill="black", font=font)
-        draw.text((75, 245), "SETTINGS", fill="black", font=font)
-        engine = LocalOCR()
-        report = []
-        for tier in ("small",):
-            lines = engine.recognize(im, (0, 0), tier)
-            report.append(f"{tier}: {len(lines)} rows, texts=" +
-                          "|".join(line.text for line in lines))
-            if not any("GAME" in line.text.upper() or "SETTINGS" in line.text.upper()
-                       for line in lines):
-                raise RuntimeError(f"{tier}: recognizer returned no expected text")
-        log_path.write_text("PASS\n" + "\n".join(report), encoding="utf-8")
-        return 0
-    except BaseException:
-        log_path.write_text("FAIL\n" + traceback.format_exc(), encoding="utf-8")
-        return 1
-
-
 def packaged_tts_selftest() -> int:
     """Check imported speech modules and installed voices without requiring audio."""
     import tempfile
@@ -137,7 +103,7 @@ def packaged_picker_selftest() -> int:
         app.persist = lambda: None
         app.status = lambda text: None
         # Frozen picker smoke test checks dragging and release; the actual
-        # Small ONNX model is exercised separately by --self-test-ocr.
+        # author's original ONNX model is verified in the separate Luna process.
         app._start_selected_ocr = lambda *args: None
         for step in range(3):
             app.select_region()
@@ -239,8 +205,6 @@ if __name__ == "__main__":
     if "--luna-worker" in sys.argv:
         from game_reader.luna_voice_worker import main as luna_worker
         raise SystemExit(luna_worker())
-    if "--self-test-ocr" in sys.argv:
-        raise SystemExit(packaged_ocr_selftest())
     if "--self-test-tts" in sys.argv:
         raise SystemExit(packaged_tts_selftest())
     if "--self-test-ui" in sys.argv:
