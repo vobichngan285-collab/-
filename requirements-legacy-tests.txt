@@ -1,0 +1,5 @@
+# TEST ONLY: historical RapidOCR v1.2 regressions remain in source tests.
+# NEVER collect these packages, weights or DLLs in the user-facing EXE.
+rapidocr==3.10.0
+onnxruntime>=1.20,<2
+numpy>=1.26,<2.3
