@@ -20,14 +20,14 @@ def main():
         for tier in ("tiny", "v5_mobile"):
             print(f"DOWNLOAD {tier} from official RapidOCR catalog", flush=True)
             paths = ocr_models.install_optional_model(
-                tier, progress=lambda message: print(message, flush=True))
+                tier, progress=lambda message: print(message.encode("ascii", "backslashreplace").decode("ascii"), flush=True))
             assert all(path.is_file() for path in paths)
             assert ocr_models.model_installed(tier)
             print(f"RUN OCR {tier}", flush=True)
             reader = LocalOCR()
             regions = reader.recognize(image, (0, 0), tier)
             texts = [item.text for item in regions]
-            print(f"OCR {tier} output {texts}", flush=True)
+            print(f"OCR {tier} output {str(texts).encode('ascii', 'backslashreplace').decode('ascii')}", flush=True)
             if not texts:
                 raise RuntimeError(f"{tier} produced zero real OCR results")
             assert reader.loaded_tier == tier
