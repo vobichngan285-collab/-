@@ -27,11 +27,13 @@ from .voice_info import preferred_voice_index, narrator_package_names, voice_dia
 from .ms_voice_discovery import (discover_natural_voices, load_user_config,
                                  inspect_local_voice_config)
 from .cues import CuePlayer
-from .hover_modes import (MOUSE_SIDE_VKS, DEFAULT_REGION, RelativeRegion,
+from .hover_modes import (MOUSE_SIDE_VKS, MOUSE_BUTTON_VKS, WHEEL_UP, WHEEL_DOWN,
+                          DEFAULT_REGION, RelativeRegion,
                           HOTKEY_FIELDS, HOTKEY_LABELS, hotkey_label,
                           valid_hotkey, sanitize_hotkeys, parse_period_ms,
                           capture_box, normalized_text, next_mouse_mode,
                           cursor_still_near_capture)
+from .mouse_input import MouseWheelListener
 from .region_picker import ScreenRegionPicker
 from .foreground import foreground_class, foreground_window_id
 from .hover_target import centered_region
@@ -45,12 +47,15 @@ DEFAULTS = {"vk": 0x77, "hotkey_label": "F8",
             "mode_vk": 0x78, "mode_hotkey_label": "F9",
             "local_vk": 0x79, "local_hotkey_label": "F10",
             "pick_vk": 0x7A, "pick_hotkey_label": "F11",
-            "clear_vk": 0x75, "clear_hotkey_label": "F6",
+            "clear_vk": WHEEL_DOWN, "clear_hotkey_label": "滚轮向下",
             "period_ms": 500, "region": list(DEFAULT_REGION),
+            "scan_frame_color": "#5CD537", "scan_frame_thickness": 2,
             "success_cue": True,
             "tier": "small", "voice": "", "rate": 0,
             "volume": 100, "dwell_ms": 0, "luna_config": "",
             **DEFAULT_FILTER_SETTINGS}
+FRAME_COLORS = {"绿色": "#5CD537", "蓝色": "#38A8FF", "黄色": "#FFD34D",
+                "红色": "#FF7373", "白色": "#FFFFFF"}
 RESULT_TTL_SECONDS = 60.0
 
 
@@ -63,7 +68,18 @@ def read_settings() -> dict:
     except (OSError, ValueError, TypeError):
         payload = {}
     settings = DEFAULTS | {k: payload[k] for k in DEFAULTS if k in payload}
+    # Upgrade only the previous stock F6 default; preserve custom assigned keys.
+    if settings["clear_vk"] == 0x75 and settings.get("clear_hotkey_label") == "F6":
+        settings["clear_vk"] = WHEEL_DOWN
+        settings["clear_hotkey_label"] = "滚轮向下"
     settings = sanitize_hotkeys(settings)
+    color = str(settings.get("scan_frame_color", "#5CD537")).upper()
+    settings["scan_frame_color"] = color if color in FRAME_COLORS.values() else "#5CD537"
+    try:
+        thickness = int(settings.get("scan_frame_thickness", 2))
+    except (ValueError, TypeError):
+        thickness = 2
+    settings["scan_frame_thickness"] = thickness if 1 <= thickness <= 8 else 2
     try:
         settings["period_ms"] = parse_period_ms(settings["period_ms"])
     except ValueError:
@@ -117,7 +133,13 @@ class ReaderApp:
         self.voices: list[tuple[str, str]] = []
         self.setting_hotkey = False
         self._binding_target = None
-        self._hotkey_previous = {k: is_key_down(self.settings[k]) for k in HOTKEY_FIELDS}
+        self._hotkey_previous = {
+            k: (is_key_down(self.settings[k])
+                if self.settings[k] not in (WHEEL_UP, WHEEL_DOWN) else False)
+            for k in HOTKEY_FIELDS}
+        self.wheel_listener = MouseWheelListener()
+        self.wheel_listener.start()
+        self._last_wheel_action_at = 0.0
         self._side_previous = {vk: is_key_down(vk) for vk in MOUSE_SIDE_VKS}
         self.mouse_mode = "pointer"
         self.mode_generation = 0
@@ -153,7 +175,9 @@ class ReaderApp:
             # Independently from the legacy V1.2 target outline, four
             # 2px non-activating windows show the actual cursor crop edge.
             self.scan_frame = ClickThroughOutline(
-                alpha=92, padding=3, thickness=2)
+                alpha=92, padding=3,
+                thickness=self.settings["scan_frame_thickness"],
+                color=self.settings["scan_frame_color"])
         except Exception as ex:
             self.overlay_error = f"{type(ex).__name__}: {ex}"
 
@@ -263,7 +287,7 @@ class ReaderApp:
             variable=self.mode_voice_var, command=self.save_visual_settings)
         self.mode_voice_check.pack(anchor="w")
 
-        selection = section(mouse, "绿色扫描框")
+        selection = section(mouse, "扫描框外观")
         pick_row = row(selection)
         card_label(pick_row, "重新框选").pack(side="left")
         self.pick_key_button = ttk.Button(
@@ -275,9 +299,27 @@ class ReaderApp:
         self.pick_region_button.pack(side="left")
         self.show_frame_var = tk.BooleanVar(value=self.settings["show_scan_frame"])
         self.show_frame_check = ttk.Checkbutton(
-            selection, text="显示绿色扫描框",
+            selection, text="显示扫描框",
             variable=self.show_frame_var, command=self.save_visual_settings)
         self.show_frame_check.pack(anchor="w")
+        style_row = row(selection, 2)
+        card_label(style_row, "边框颜色").pack(side="left")
+        self.scan_color_var = tk.StringVar(value=next(
+            (name for name, color in FRAME_COLORS.items()
+             if color == self.settings["scan_frame_color"]), "绿色"))
+        self.scan_color_select = ttk.Combobox(
+            style_row, textvariable=self.scan_color_var, state="readonly",
+            width=9, values=tuple(FRAME_COLORS))
+        self.scan_color_select.pack(side="left", padx=(10, 22))
+        self.scan_color_select.bind("<<ComboboxSelected>>", self.save_frame_preferences)
+        card_label(style_row, "边框粗细（像素）").pack(side="left")
+        self.scan_thickness_var = tk.StringVar(value=str(self.settings["scan_frame_thickness"]))
+        self.scan_thickness_select = ttk.Spinbox(
+            style_row, from_=1, to=8, increment=1, width=5,
+            textvariable=self.scan_thickness_var, command=self.save_frame_preferences)
+        self.scan_thickness_select.pack(side="left", padx=(10, 0))
+        self.scan_thickness_select.bind("<Return>", self.save_frame_preferences)
+        self.scan_thickness_select.bind("<FocusOut>", self.save_frame_preferences)
         self.region_info_var = tk.StringVar(
             value=self.format_region(RelativeRegion.from_settings(self.settings["region"])))
         ttk.Label(selection, textvariable=self.region_info_var,
@@ -428,7 +470,7 @@ class ReaderApp:
 
         about = self._pages["about"]
         details = section(about, "Blue Star OCR")
-        note(details, "Windows 11 · V1.2.1 · PP-OCRv6 Small")
+        note(details, "Windows 11 · V1.2.1 极速基准 · PP-OCRv6 Small · 滚轮与边框")
 
         footer = ttk.Frame(self.root, padding=(22, 10, 22, 14))
         footer.pack(side="bottom", fill="x")
@@ -485,6 +527,39 @@ class ReaderApp:
             self.scan_frame.hide()
         self.persist()
 
+    def save_frame_preferences(self, _event=None):
+        """Adjust only native border windows, never the OCR or speech engine."""
+        label = self.scan_color_var.get()
+        if label not in FRAME_COLORS:
+            return False
+        try:
+            thickness = int(self.scan_thickness_var.get())
+        except (TypeError, ValueError):
+            return False
+        if not 1 <= thickness <= 8:
+            self.scan_thickness_var.set(str(self.settings["scan_frame_thickness"]))
+            self.status("扫描框粗细须在 1～8 像素之间。")
+            return False
+        color = FRAME_COLORS[label]
+        if (color != self.settings["scan_frame_color"] or
+                thickness != self.settings["scan_frame_thickness"]):
+            try:
+                from .overlay import ClickThroughOutline
+                replacement = ClickThroughOutline(
+                    alpha=92, padding=3, thickness=thickness, color=color)
+            except Exception as exc:
+                self.status("扫描框设置失败：" + type(exc).__name__)
+                return False
+            old = self.scan_frame
+            self.scan_frame = replacement
+            if old is not None:
+                old.close()
+            self.settings["scan_frame_color"] = color
+            self.settings["scan_frame_thickness"] = thickness
+            self.persist()
+            self.update_scan_frame()
+        return True
+
     def save_similarity(self, _event=None):
         from .text_filters import similarity_threshold
         try:
@@ -523,6 +598,9 @@ class ReaderApp:
         self.similarity_var.set("2")
         self.mode_voice_var.set(True)
         self.show_frame_var.set(True)
+        self.scan_color_var.set("绿色")
+        self.scan_thickness_var.set("2")
+        self.save_frame_preferences()
         self.similarity_enabled_var.set(True)
         self.settings["region"] = centered_region(
             RelativeRegion.from_settings(DEFAULT_REGION)).as_list()
@@ -544,14 +622,16 @@ class ReaderApp:
                 (self.mode_key_button, "切换默认模式和鼠标模式的快捷键"),
                 (self.local_key_button, "立即识别鼠标附近文字的快捷键"),
                 (self.pick_key_button, "全局从鼠标位置开始自由拖框的快捷键"),
-                (self.clear_key_button, "手动立即清空识别结果的快捷键"),
+                (self.clear_key_button, "清除上一次全屏 OCR 的快捷键，可设置滚轮向上或向下"),
                 (self.success_cue_check, "识别成功提示音开关"),
                 (self.test_cue_button, "试听识别成功的金属叮声，不启动 OCR"),
                 (self.period_entry, "鼠标局部 OCR 周期，单位毫秒"),
                 (self.period_save_button, "保存局部 OCR 周期"),
                 (self.similarity_check, "启用重复文本相似度过滤"),
                 (self.similarity_spin, "文本相似度阈值零到八"),
-                (self.show_frame_check, "显示跟随鼠标的绿色扫描框"),
+                (self.show_frame_check, "显示跟随鼠标的扫描框"),
+                (self.scan_color_select, "扫描框颜色，绿色蓝色黄色红色白色"),
+                (self.scan_thickness_select, "扫描框粗细，一到八像素"),
                 (self.mode_voice_check, "切换模式时说出鼠标模式或默认模式"),
                 (self.pick_region_button, "从鼠标当前位置暗屏拖框并立即识别"),
                 (self.voice_select, "选择本机微软云希晓晓或其他语音"),
