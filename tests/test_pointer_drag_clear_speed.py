@@ -17,7 +17,7 @@ from game_reader.app import ReaderApp
 from game_reader.core import OCRLine
 from game_reader.cues import make_click_wave
 from game_reader.hover_modes import (RelativeRegion, capture_box,
-                                     region_from_drag, sanitize_hotkeys)
+                                     region_from_drag, sanitize_hotkeys, WHEEL_DOWN)
 
 
 def test_pointer_drag_anchors_to_actual_cursor_and_preserves_all_offsets():
@@ -43,7 +43,7 @@ def test_saved_region_keeps_offset_and_all_five_shortcuts_migrate(tmp_path, monk
     monkeypatch.setattr(module, "CONFIG_PATH", settings_file)
     settings = module.read_settings()
     assert settings["region"] == [165, -105, 550, 300]
-    assert settings["clear_vk"] == 0x75
+    assert settings["clear_vk"] == WHEEL_DOWN
     assert settings["success_cue"] is True
     assert len({settings[k] for k in
                 ("vk", "mode_vk", "local_vk", "pick_vk", "clear_vk")}) == 5
