@@ -9,6 +9,7 @@ on:
       - 'prepare_models.py'
       - 'requirements-win.txt'
       - 'tests/**'
+      - 'tools/verify_optional_models.py'
       - '.github/workflows/build-windows.yml'
 permissions:
   contents: write
