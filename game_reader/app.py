@@ -948,7 +948,7 @@ class ReaderApp:
                 if image.size != (box[2]-box[0], box[3]-box[1]):
                     raise RuntimeError("框选截图尺寸与实际识别区域不一致")
                 with self._ocr_lock:
-                    lines = self.ocr_worker.recognize(image, box[:2], self.settings["tier"])
+                    lines = self.ocr_worker.recognize(image, box[:2], self.settings.get("tier", "small"))
                 infer_ms = round((time.monotonic() - started) * 1000) - capture_ms
                 self.events.put(("ocr_ok", request_id, lines,
                                  round((time.monotonic() - started) * 1000),
@@ -1191,7 +1191,7 @@ class ReaderApp:
                 if image.size != (box[2] - box[0], box[3] - box[1]):
                     raise RuntimeError("局部截图尺寸与显示器范围不一致")
                 with self._ocr_lock:
-                    lines = self.ocr_worker.recognize(image, box[:2], self.settings["tier"])
+                    lines = self.ocr_worker.recognize(image, box[:2], self.settings.get("tier", "small"))
                 infer_ms = round((time.monotonic() - started) * 1000) - capture_ms
                 self.events.put(("hover_ok", generation, lines, manual,
                                  round((time.monotonic() - started) * 1000),

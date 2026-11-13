@@ -14,7 +14,7 @@ from game_reader.ocr_backend import LocalOCR, TIERS
 
 def test_original_v12_small_params_not_replaced_with_faster_resize():
     source = inspect.getsource(LocalOCR.recognize)
-    assert tuple(TIERS) == ("small",)
+    assert TIERS["small"] == ("PP-OCRv6_det_small.onnx", "PP-OCRv6_rec_small.onnx")
     assert "Det.limit_type" not in source
     assert "Det.limit_side_len" not in source
     assert "ModelType.MEDIUM" not in source

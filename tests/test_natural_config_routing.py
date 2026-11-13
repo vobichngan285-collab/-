@@ -110,7 +110,7 @@ def test_safe_config_status_covers_main_failure_stages(tmp_path):
 def test_original_v12_small_core_and_reading_behavior_unchanged():
     from game_reader.ocr_backend import LocalOCR, TIERS
     import inspect
-    assert list(TIERS) == ["small"]
+    assert TIERS["small"] == ("PP-OCRv6_det_small.onnx", "PP-OCRv6_rec_small.onnx")
     source = inspect.getsource(LocalOCR.recognize)
     assert "Det.limit_type" not in source
     assert "Det.limit_side_len" not in source
