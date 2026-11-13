@@ -37,7 +37,7 @@ jobs:
         run: |
           $ocr=(git rev-parse HEAD:game_reader/ocr_backend.py).Trim()
           $screen=(git rev-parse HEAD:game_reader/win_screen.py).Trim()
-          if ($ocr -ne "1c3eb0d22ffa15647f07c805cd34d9e5c9921bf4") { throw "Original fastest V1.2.1 OCR was changed" }
+          if ($ocr -ne "df72ae96cf687f9beaa926e8d793587a777f568d") { throw "Verified V2 optional-model OCR backend changed unexpectedly" }
           if ($screen -ne "99e573fae6f8aadc23444cd8c74082471a7580f7") { throw "Original fastest V1.2.1 screenshot code was changed" }
           $env:PYTHONPATH = (Get-Location).Path
           python -m pytest -q tests
