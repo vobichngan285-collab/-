@@ -53,7 +53,7 @@ class LunaNaturalBridge:
 
     def set_rate(self, rate):
         with self._condition:
-            self.rate = max(-8, min(8, int(rate)))
+            self.rate = max(-8, min(12, int(rate)))
 
     def set_volume(self, volume):
         with self._condition:

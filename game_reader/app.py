@@ -51,12 +51,22 @@ DEFAULTS = {"vk": 0x77, "hotkey_label": "F8",
             "period_ms": 500, "region": list(DEFAULT_REGION),
             "scan_frame_color": "#5CD537", "scan_frame_thickness": 2,
             "success_cue": True,
-            "tier": "small", "voice": "", "rate": 0,
+            "tier": "small", "voice": "", "rate": 0, "rate_level": 4,
             "volume": 100, "dwell_ms": 0, "luna_config": "",
             **DEFAULT_FILTER_SETTINGS}
 FRAME_COLORS = {"绿色": "#5CD537", "蓝色": "#38A8FF", "黄色": "#FFD34D",
                 "红色": "#FF7373", "白色": "#FFFFFF"}
 RESULT_TTL_SECONDS = 60.0
+
+
+def speech_rate_for_level(level: int) -> int:
+    """0-10 UI steps; old -8..8 range remains, new top is 8 * 1.5 = 12."""
+    return -8 + 2 * max(0, min(10, int(level)))
+
+
+def level_for_speech_rate(rate: int) -> int:
+    """Preserve the old chosen speed when upgrading from the -8..8 slider."""
+    return max(0, min(10, round((int(rate) + 8) / 2)))
 
 
 def read_settings() -> dict:
@@ -68,6 +78,14 @@ def read_settings() -> dict:
     except (OSError, ValueError, TypeError):
         payload = {}
     settings = DEFAULTS | {k: payload[k] for k in DEFAULTS if k in payload}
+    # Keep old user speech speed on the new 0-10 interface; no voice reset.
+    try:
+        level = (int(payload["rate_level"]) if "rate_level" in payload
+                 else level_for_speech_rate(payload.get("rate", 0)))
+    except (TypeError, ValueError):
+        level = 4
+    settings["rate_level"] = max(0, min(10, level))
+    settings["rate"] = speech_rate_for_level(settings["rate_level"])
     # Upgrade only the previous stock F6 default; preserve custom assigned keys.
     if settings["clear_vk"] == 0x75 and settings.get("clear_hotkey_label") == "F6":
         settings["clear_vk"] = WHEEL_DOWN
@@ -108,7 +126,7 @@ def write_settings(settings: dict) -> None:
 class ReaderApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        root.title("Blue Star OCR · 游戏文字朗读助手")
+        root.title("Blue Star OCR 2.0 · 游戏文字朗读助手")
         root.geometry("1120x900")
         root.minsize(960, 760)
         root.protocol("WM_DELETE_WINDOW", self.close)
@@ -199,7 +217,7 @@ class ReaderApp:
 
         top = ttk.Frame(self.root, padding=(22, 14))
         top.pack(fill="x")
-        ttk.Label(top, text="Blue Star OCR", style="Heading.TLabel").pack(side="left")
+        ttk.Label(top, text="Blue Star OCR 2.0", style="Heading.TLabel").pack(side="left")
         ttk.Label(top, text="  游戏文字朗读助手", style="Subheading.TLabel").pack(
             side="left", padx=(5, 0))
 
@@ -388,9 +406,9 @@ class ReaderApp:
         voice_controls = section(voice, "语速与音量")
         rate_row = row(voice_controls)
         card_label(rate_row, "语速").pack(side="left")
-        self.rate_var = tk.IntVar(value=int(self.settings["rate"]))
+        self.rate_var = tk.IntVar(value=int(self.settings["rate_level"]))
         self.rate_slider = ttk.Scale(
-            rate_row, from_=-8, to=8, variable=self.rate_var, command=self.change_rate)
+            rate_row, from_=0, to=10, variable=self.rate_var, command=self.change_rate)
         self.rate_slider.pack(side="left", fill="x", expand=True, padx=12)
         self.rate_label = ttk.Label(
             rate_row, text=str(self.rate_var.get()), width=4, style="Card.TLabel")
@@ -470,7 +488,7 @@ class ReaderApp:
 
         about = self._pages["about"]
         details = section(about, "Blue Star OCR")
-        note(details, "Windows 11 · V1.2.1 极速基准 · PP-OCRv6 Small · 滚轮与边框")
+        note(details, "Windows 11 · 正式版本 2.0 · PP-OCRv6 Small · 滚轮与边框")
 
         footer = ttk.Frame(self.root, padding=(22, 10, 22, 14))
         footer.pack(side="bottom", fill="x")
@@ -1029,11 +1047,14 @@ class ReaderApp:
         self.status(message)
 
     def change_rate(self, _value):
-        value = max(-8, min(8, int(round(float(self.rate_var.get())))))
-        self.rate_label.configure(text=str(value))
-        if self.settings["rate"] != value:
-            self.settings["rate"] = value
-            self.speech.set_rate(value)
+        level = max(0, min(10, int(round(float(_value)))))
+        self.rate_label.configure(text=str(level))
+        rate = speech_rate_for_level(level)
+        if (self.settings["rate_level"] != level or
+                self.settings["rate"] != rate):
+            self.settings["rate_level"] = level
+            self.settings["rate"] = rate
+            self.speech.set_rate(rate)
             self.persist()
 
     def change_volume(self, _value):
@@ -1243,14 +1264,14 @@ class ReaderApp:
                     self.status(f"识别完成：{len(self.lines)} 个朗读区域；"
                                 f"耗时 {milliseconds} 毫秒{timing_note}。"
                                 "60 秒后自动清空。")
-                    speakable = filter_speech_text(
-                        "\n".join(region.text for region in self.lines), self.settings)
+                    # F8 full-screen text is never subject to mouse OCR filters.
+                    speakable = "\n".join(region.text for region in self.lines).strip()
                     if (self.mouse_mode == "pointer"
                             and self.settings.get("success_cue", True)):
                         if speakable:
                             self.cues.play("complete")
                         elif self.lines:
-                            self.status("识别到文字，但被内容过滤全部排除；未播放成功提示音。")
+                            self.status("识别结果没有可朗读内容；未播放成功提示音。")
                     if source == "selection" and self.mouse_mode == "hover":
                         spoken = filter_speech_text(
                             "\n".join(line.text for line in self.lines), self.settings)
@@ -1428,7 +1449,7 @@ class ReaderApp:
                         self.last_target = target
                     to_read = self.hover.update(target, time.monotonic() * 1000)
                     if to_read is not None:
-                        spoken = filter_speech_text(to_read.text, self.settings)
+                        spoken = to_read.text  # F8 pointer reads original OCR verbatim.
                         if spoken:
                             self.speak_selected(spoken)
                         else:

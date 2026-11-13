@@ -1,8 +1,8 @@
-name: Build V1.2.1 fastest baseline with wheel clear and colorful frame
+name: Build Blue Star OCR 2.0 - speed levels and mouse-only text filters
 on:
   workflow_dispatch:
   push:
-    branches: ['feat/windows-v121-wheel-outline-20261113']
+    branches: ['feat/windows-v2-speed-filter-20261113']
     paths:
       - 'game_reader/**'
       - 'main.py'
@@ -268,13 +268,13 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory release -Force | Out-Null
-          Compress-Archive -Path dist/GameTextReader -DestinationPath release/GameTextReader_V1.2.1_FastWheel_FrameColors_Windows_x64.zip -CompressionLevel Optimal -Force
-          $size = (Get-Item release/GameTextReader_V1.2.1_FastWheel_FrameColors_Windows_x64.zip).Length
+          Compress-Archive -Path dist/GameTextReader -DestinationPath release/BlueStarOCR_V2.0_Windows_x64.zip -CompressionLevel Optimal -Force
+          $size = (Get-Item release/BlueStarOCR_V2.0_Windows_x64.zip).Length
           Write-Output "Portable archive size: $size bytes"
       - uses: actions/upload-artifact@v4
         with:
-          name: GameTextReader-V1.2.1-FastWheel-FrameColors
-          path: release/GameTextReader_V1.2.1_FastWheel_FrameColors_Windows_x64.zip
+          name: BlueStarOCR-V2.0-Windows
+          path: release/BlueStarOCR_V2.0_Windows_x64.zip
           if-no-files-found: error
           retention-days: 30
       - name: Verify ZIP and publish browser-direct Windows prerelease
@@ -283,7 +283,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           Add-Type -AssemblyName System.IO.Compression
-          $zip=(Resolve-Path 'release/GameTextReader_V1.2.1_FastWheel_FrameColors_Windows_x64.zip').Path
+          $zip=(Resolve-Path 'release/BlueStarOCR_V2.0_Windows_x64.zip').Path
           $archive=[System.IO.Compression.ZipFile]::OpenRead($zip)
           try {
             $names=@($archive.Entries | ForEach-Object FullName)
@@ -301,8 +301,8 @@ jobs:
           } finally { $archive.Dispose() }
           $sha=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
           Write-Output "SHA256=$sha size=$((Get-Item $zip).Length)"
-          $tag='win-v121-fast-wheel-outline-20261113'
-          gh release create $tag $zip --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --prerelease --title 'Blue Star OCR V1.2.1 FastVoice - Wheel and Frame' --notes 'User-confirmed fastest V1.2.1 baseline. OCR backend, ONNX CPU runtime, capture, TTS and OCR models are unchanged. Newly supports mouse wheel up/down as clear OCR hotkey (down by default), and five scan frame colors with 1-8px width. Frozen OCR, TTS, UIA, picker and startup smoke tests must pass before publishing. Independent prerelease; does not overwrite the original.'
+          $tag='win-v2.0-speed-filter-20261113'
+          gh release create $tag $zip --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --prerelease --title 'Blue Star OCR 2.0 - Voice Speed and Mouse Filtering' --notes 'Based on the verified V1.2.1 fastest two-mode release. Only new changes: 0-10 voice speed levels with native rate upper value raised from 8 to 12 (actual speed depends on installed engine), and English/digit/symbol filters now apply only to mouse-follow OCR, never F8 full-screen pointer reading. The app displays version 2.0. OCR engine, model, screenshots, keyboard and wheel hotkeys, native voice selection, frame UI and other features are unchanged. Windows runner self-tests, OCR, audio, UIA and ZIP checks must all pass before publishing. This release does not overwrite previous versions.'
           if ($LASTEXITCODE -ne 0) { throw 'GitHub release publish failed' }
           gh release view $tag --repo $env:GITHUB_REPOSITORY --json url,assets
           if ($LASTEXITCODE -ne 0) { throw 'Release verification failed' }
