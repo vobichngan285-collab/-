@@ -1,8 +1,8 @@
-name: Build Blue Star OCR 2.0 - speed levels and mouse-only text filters
+name: Build Blue Star OCR 2.0 - optional verified OCR downloads
 on:
   workflow_dispatch:
   push:
-    branches: ['feat/windows-v2-speed-filter-20261113']
+    branches: ['feat/windows-v2-on-demand-models-20261114']
     paths:
       - 'game_reader/**'
       - 'main.py'
@@ -48,6 +48,12 @@ jobs:
         shell: pwsh
         run: |
           python prepare_models.py
+      - name: Verify real optional ONNX downloads and Chinese OCR on Windows
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = (Get-Location).Path
+          python tools/verify_optional_models.py
+          if ($LASTEXITCODE -ne 0) { throw 'Optional OCR model verification failed' }
       - name: Build lean portable EXE folder
         shell: pwsh
         run: |
@@ -268,13 +274,13 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory release -Force | Out-Null
-          Compress-Archive -Path dist/GameTextReader -DestinationPath release/BlueStarOCR_V2.0_Windows_x64.zip -CompressionLevel Optimal -Force
-          $size = (Get-Item release/BlueStarOCR_V2.0_Windows_x64.zip).Length
+          Compress-Archive -Path dist/GameTextReader -DestinationPath release/BlueStarOCR_V2.0_OptionalModels_Windows_x64.zip -CompressionLevel Optimal -Force
+          $size = (Get-Item release/BlueStarOCR_V2.0_OptionalModels_Windows_x64.zip).Length
           Write-Output "Portable archive size: $size bytes"
       - uses: actions/upload-artifact@v4
         with:
-          name: BlueStarOCR-V2.0-Windows
-          path: release/BlueStarOCR_V2.0_Windows_x64.zip
+          name: BlueStarOCR-V2.0-OptionalModels-Windows
+          path: release/BlueStarOCR_V2.0_OptionalModels_Windows_x64.zip
           if-no-files-found: error
           retention-days: 30
       - name: Verify ZIP and publish browser-direct Windows prerelease
@@ -283,7 +289,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           Add-Type -AssemblyName System.IO.Compression
-          $zip=(Resolve-Path 'release/BlueStarOCR_V2.0_Windows_x64.zip').Path
+          $zip=(Resolve-Path 'release/BlueStarOCR_V2.0_OptionalModels_Windows_x64.zip').Path
           $archive=[System.IO.Compression.ZipFile]::OpenRead($zip)
           try {
             $names=@($archive.Entries | ForEach-Object FullName)
@@ -301,8 +307,8 @@ jobs:
           } finally { $archive.Dispose() }
           $sha=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
           Write-Output "SHA256=$sha size=$((Get-Item $zip).Length)"
-          $tag='win-v2.0-speed-filter-20261113'
-          gh release create $tag $zip --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --prerelease --title 'Blue Star OCR 2.0 - Voice Speed and Mouse Filtering' --notes 'Based on the verified V1.2.1 fastest two-mode release. Only new changes: 0-10 voice speed levels with native rate upper value raised from 8 to 12 (actual speed depends on installed engine), and English/digit/symbol filters now apply only to mouse-follow OCR, never F8 full-screen pointer reading. The app displays version 2.0. OCR engine, model, screenshots, keyboard and wheel hotkeys, native voice selection, frame UI and other features are unchanged. Windows runner self-tests, OCR, audio, UIA and ZIP checks must all pass before publishing. This release does not overwrite previous versions.'
+          $tag='win-v2.0-optional-models-20261114'
+          gh release create $tag $zip --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --prerelease --title 'Blue Star OCR 2.0 - On-Demand V6 Tiny and V5 Mobile Models' --notes 'Based on Blue Star OCR 2.0 with the same two modes, voice/hotkeys and bundled V6 Small. Additional on-demand PP-OCRv6 Tiny and Chinese PP-OCRv5 Mobile model selection. Model pairs download only if selected, SHA-256 verified, atomic install, and optional models are never bundled. Windows CI checks downloads and real OCR inference. Previous versions retained.'
           if ($LASTEXITCODE -ne 0) { throw 'GitHub release publish failed' }
           gh release view $tag --repo $env:GITHUB_REPOSITORY --json url,assets
           if ($LASTEXITCODE -ne 0) { throw 'Release verification failed' }

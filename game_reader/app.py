@@ -20,6 +20,7 @@ from PIL import ImageGrab
 
 from .core import HoverTracker, OCRLine, hit_test, build_reading_regions
 from .ocr_backend import LocalOCR
+from .ocr_models import MODEL_LABELS, model_installed, install_optional_model
 from .win_screen import (enable_dpi_awareness, get_cursor, is_key_down,
                          grab_current_monitor, monitor_rect_at_cursor)
 from .speech import SpeechWorker, enumerate_sapi_voices
@@ -103,7 +104,8 @@ def read_settings() -> dict:
     except ValueError:
         settings["period_ms"] = 500
     settings["region"] = RelativeRegion.from_settings(settings["region"]).as_list()
-    settings["tier"] = "small"
+    if settings.get("tier") not in MODEL_LABELS or not model_installed(settings["tier"]):
+        settings["tier"] = "small"
     settings["dwell_ms"] = 0
     try:
         settings["similarity_threshold"] = similarity_threshold(
@@ -141,6 +143,7 @@ class ReaderApp:
         self.lines: list[OCRLine] = []
         self._full_capture_window = None
         self.ocr_worker = LocalOCR()
+        self._model_downloading = False
         self.busy = False
         self.closed = False
         self.capture_id = 0
@@ -430,7 +433,7 @@ class ReaderApp:
         self.voice_diag_button.pack(side="left")
 
         fullscreen = self._pages["fullscreen"]
-        full_frame = section(fullscreen, "原版 V1.2 Small OCR")
+        full_frame = section(fullscreen, "全屏 OCR")
         full_hotkey = row(full_frame)
         card_label(full_hotkey, "全屏 OCR 快捷键").pack(side="left")
         self.key_button = ttk.Button(
@@ -456,6 +459,28 @@ class ReaderApp:
         self.test_cue_button = ttk.Button(
             cue_row, text="试听叮声", command=self.test_cue)
         self.test_cue_button.pack(side="left", padx=(20, 0))
+
+        # Both existing OCR modes share the same on-demand model selection.
+        model_group = section(fullscreen, "OCR 模型（全屏与鼠标模式共用）")
+        model_row = row(model_group, 3)
+        card_label(model_row, "识别模型").pack(side="left")
+        self.model_var = tk.StringVar(value=MODEL_LABELS[self.settings["tier"]])
+        self.model_select = ttk.Combobox(
+            model_row, textvariable=self.model_var, width=36,
+            state="readonly", values=tuple(MODEL_LABELS.values()))
+        self.model_select.pack(side="left", padx=(10, 12), fill="x", expand=True)
+        self.model_select.bind("<<ComboboxSelected>>", self.on_model_choice)
+        self.model_action_button = ttk.Button(
+            model_group, text="检查模型...", command=self.model_action)
+        self.model_action_button.pack(anchor="w", pady=(5, 7))
+        self.model_status_var = tk.StringVar()
+        self.model_status_label = ttk.Label(
+            model_group, textvariable=self.model_status_var,
+            style="CardMuted.TLabel", wraplength=630)
+        self.model_status_label.pack(anchor="w", pady=(3, 3))
+        note(model_group, "V6 Small 已内置，始终可用；Tiny 和 V5 Mobile 可按需下载，"
+             "安装后离线使用。下载完成不会自动切换。")
+        self.update_model_controls()
 
         filtering = self._pages["filters"]
         filter_frame = section(filtering, "朗读内容过滤")
@@ -488,7 +513,7 @@ class ReaderApp:
 
         about = self._pages["about"]
         details = section(about, "Blue Star OCR")
-        note(details, "Windows 11 · 正式版本 2.0 · PP-OCRv6 Small · 滚轮与边框")
+        note(details, "Windows 11 · 正式版本 2.0 · 内置 V6 Small · 可下载 Tiny/V5 Mobile")
 
         footer = ttk.Frame(self.root, padding=(22, 10, 22, 14))
         footer.pack(side="bottom", fill="x")
@@ -659,6 +684,8 @@ class ReaderApp:
                 (self.voice_diag_button, "复制语音诊断"),
                 (self.import_luna_button, "选择本机原版语音配置"),
                 (self.rate_slider, "调整朗读语速"),
+                (self.model_select, "选择 OCR 模型，支持 V6 Small、V6 Tiny、V5 Mobile"),
+                (self.model_action_button, "下载并安装选定的 OCR 模型或切换到已安装模型"),
                 (self.volume_slider, "调整朗读音量"),
                 (self.read_btn, "立即截图进行原版全屏 OCR"),
                 (self.filter_english_check, "过滤英文字母，开关"),
@@ -921,7 +948,7 @@ class ReaderApp:
                 if image.size != (box[2]-box[0], box[3]-box[1]):
                     raise RuntimeError("框选截图尺寸与实际识别区域不一致")
                 with self._ocr_lock:
-                    lines = self.ocr_worker.recognize(image, box[:2], "small")
+                    lines = self.ocr_worker.recognize(image, box[:2], self.settings["tier"])
                 infer_ms = round((time.monotonic() - started) * 1000) - capture_ms
                 self.events.put(("ocr_ok", request_id, lines,
                                  round((time.monotonic() - started) * 1000),
@@ -1046,6 +1073,66 @@ class ReaderApp:
         self.root.update_idletasks()
         self.status(message)
 
+    def chosen_model_tier(self) -> str:
+        label = self.model_var.get()
+        return next((tier for tier, display in MODEL_LABELS.items()
+                     if label == display), "small")
+
+    def on_model_choice(self, _event=None):
+        self.update_model_controls()
+
+    def update_model_controls(self):
+        if self._model_downloading:
+            self.model_action_button.configure(text="正在下载...", state="disabled")
+            return
+        tier = self.chosen_model_tier()
+        active = tier == self.settings["tier"]
+        installed = model_installed(tier)
+        if active:
+            action, state = "当前正在使用", "disabled"
+        elif installed:
+            action, state = "切换使用", "normal"
+        else:
+            action, state = "下载并安装", "normal"
+        self.model_action_button.configure(text=action, state=state)
+        self.model_status_var.set(
+            f"{MODEL_LABELS[tier]}：{'已安装' if installed else '未安装'}。"
+            f"当前使用：{MODEL_LABELS[self.settings['tier']]}。")
+
+    def model_action(self):
+        if self._model_downloading:
+            return
+        tier = self.chosen_model_tier()
+        if tier == self.settings["tier"]:
+            return
+        if model_installed(tier):
+            if self.busy or self.hover_ocr_busy or self.pending_full_capture:
+                self.status("OCR 正在识别，请稍后再切换模型。")
+                return
+            self.invalidate("正在切换 OCR 模型...")
+            with self._ocr_lock:
+                self.ocr_worker.engine = None
+                self.ocr_worker.loaded_tier = None
+            self.settings["tier"] = tier
+            self.persist()
+            self.update_model_controls()
+            self.status(f"已切换为 {MODEL_LABELS[tier]}，下次识别立即生效。")
+            return
+        self._model_downloading = True
+        self.model_select.configure(state="disabled")
+        self.update_model_controls()
+        self.model_status_var.set(f"正在下载 {MODEL_LABELS[tier]}，请勿退出软件。")
+        def work():
+            try:
+                install_optional_model(
+                    tier, progress=lambda message: self.events.put(
+                        ("model_progress", tier, message)))
+                self.events.put(("model_ready", tier))
+            except Exception as exc:
+                self.events.put(("model_fail", tier, f"{type(exc).__name__}: {exc}"[:180]))
+        threading.Thread(target=work, name="OptionalOCRModelDownload",
+                         daemon=True).start()
+
     def change_rate(self, _value):
         level = max(0, min(10, int(round(float(_value)))))
         self.rate_label.configure(text=str(level))
@@ -1104,7 +1191,7 @@ class ReaderApp:
                 if image.size != (box[2] - box[0], box[3] - box[1]):
                     raise RuntimeError("局部截图尺寸与显示器范围不一致")
                 with self._ocr_lock:
-                    lines = self.ocr_worker.recognize(image, box[:2], "small")
+                    lines = self.ocr_worker.recognize(image, box[:2], self.settings["tier"])
                 infer_ms = round((time.monotonic() - started) * 1000) - capture_ms
                 self.events.put(("hover_ok", generation, lines, manual,
                                  round((time.monotonic() - started) * 1000),
@@ -1307,6 +1394,23 @@ class ReaderApp:
                     elif generation == self.mode_generation and self.mouse_mode == "hover":
                         self.last_ocr_error = detail
                         self.status("局部 OCR 失败。点击「复制失败诊断」查看。")
+                elif kind == "model_progress":
+                    _, tier, message = event
+                    if self._model_downloading:
+                        self.model_status_var.set(message)
+                elif kind == "model_ready":
+                    _, tier = event
+                    self._model_downloading = False
+                    self.model_select.configure(state="readonly")
+                    self.update_model_controls()
+                    self.status(f"{MODEL_LABELS[tier]} 已下载并校验安装。点击“切换使用”即可启用。")
+                elif kind == "model_fail":
+                    _, tier, detail = event
+                    self._model_downloading = False
+                    self.model_select.configure(state="readonly")
+                    self.update_model_controls()
+                    self.model_status_var.set(f"{MODEL_LABELS[tier]} 下载失败：{detail}")
+                    self.status("可选模型下载失败，原 V6 Small 和当前模型未受影响。")
                 elif kind == "voices":
                     _, voices, packages, natural_count, has_config = event
                     self.voices = voices
