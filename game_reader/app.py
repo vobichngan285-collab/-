@@ -693,11 +693,14 @@ class ReaderApp:
             self.finish_hotkey()
         self.setting_hotkey = True
         self._binding_target = field
-        self._hotkey_button(field).configure(text="请按键／侧键")
-        self._side_previous = {vk: is_key_down(vk) for vk in MOUSE_SIDE_VKS}
+        self._hotkey_button(field).configure(text="请按键／滚轮／侧键")
+        self._side_previous = {vk: is_key_down(vk) for vk in MOUSE_BUTTON_VKS}
+        listener = getattr(self, "wheel_listener", None)
+        if listener is not None:
+            listener.drain()
         self.root.bind("<KeyPress>", self.accept_key)
         self.root.focus_force()
-        self.status("按键盘单键或鼠标侧键1/2进行设置；Esc 取消。")
+        self.status("请按单键、滚轮上／下、鼠标中键或侧键设置；Esc 取消。")
 
     def _hotkey_button(self, field: str):
         return {"vk": self.key_button, "mode_vk": self.mode_key_button,
@@ -728,7 +731,7 @@ class ReaderApp:
 
     def _apply_hotkey(self, vk: int, keyname: str = "") -> bool:
         if not valid_hotkey(vk) or self._binding_target is None:
-            self.status("仅接受键盘单键或两枚标准鼠标侧键；不接受左／右点击和修饰键。")
+            self.status("仅接受单键、滚轮上下、中键或侧键；不接受左／右点击和修饰键。")
             return False
         field = self._binding_target
         for other in HOTKEY_FIELDS:
@@ -750,7 +753,7 @@ class ReaderApp:
     def _capture_mouse_hotkey(self):
         # Tk KeyPress excludes XBUTTON1/XBUTTON2. Use the same native
         # Windows virtual-key state reader as the actual hotkey dispatcher.
-        for vk in MOUSE_SIDE_VKS:
+        for vk in MOUSE_BUTTON_VKS:
             down = is_key_down(vk)
             old = self._side_previous.get(vk, down)
             self._side_previous[vk] = down
@@ -1345,37 +1348,56 @@ class ReaderApp:
         except Exception:
             self.scan_frame.hide()
 
+    def _dispatch_hotkey(self, field):
+        """Original hotkey actions, reached by keypress or wheel event."""
+        if field == "vk":
+            if self.root.state() == "normal":
+                self.capture_from_button()
+            else:
+                self.capture()
+        elif field == "mode_vk":
+            self.toggle_mouse_mode()
+        elif field == "local_vk":
+            self.start_hover_ocr(manual=True)
+        elif field == "pick_vk":
+            self.select_region()
+        elif field == "clear_vk":
+            self.clear_results()
+
     def poll_input(self):
         if self.closed:
             return
         try:
+            listener = getattr(self, "wheel_listener", None)
+            wheel_events = listener.drain() if listener is not None else []
             if self.setting_hotkey:
+                if wheel_events:
+                    wheel_key = wheel_events[0][0]
+                    self._apply_hotkey(wheel_key, hotkey_label(wheel_key))
                 self._capture_mouse_hotkey()
-                # Holding a newly recorded side button must not immediately
-                # trigger the just assigned action on the next polling frame.
-                for field in HOTKEY_FIELDS:
-                    self._hotkey_previous[field] = is_key_down(self.settings[field])
-            elif not self._choosing_region:
+                # Never interpret a wheel pseudo-key via GetAsyncKeyState.
                 for field in HOTKEY_FIELDS:
                     vk = self.settings[field]
+                    self._hotkey_previous[field] = (
+                        is_key_down(vk) if vk not in (WHEEL_UP, WHEEL_DOWN) else False)
+            elif not self._choosing_region:
+                for wheel_key, event_at in wheel_events:
+                    if event_at - getattr(self, "_last_wheel_action_at", 0.0) < 0.25:
+                        continue
+                    for field in HOTKEY_FIELDS:
+                        if self.settings.get(field) == wheel_key:
+                            self._last_wheel_action_at = event_at
+                            self._dispatch_hotkey(field)
+                            break
+                for field in HOTKEY_FIELDS:
+                    vk = self.settings[field]
+                    if vk in (WHEEL_UP, WHEEL_DOWN):
+                        continue
                     down = is_key_down(vk)
                     old = self._hotkey_previous.get(field, down)
                     self._hotkey_previous[field] = down
-                    if not down or old:
-                        continue
-                    if field == "vk":
-                        if self.root.state() == "normal":
-                            self.capture_from_button()
-                        else:
-                            self.capture()
-                    elif field == "mode_vk":
-                        self.toggle_mouse_mode()
-                    elif field == "local_vk":
-                        self.start_hover_ocr(manual=True)
-                    elif field == "pick_vk":
-                        self.select_region()
-                    elif field == "clear_vk":
-                        self.clear_results()
+                    if down and not old:
+                        self._dispatch_hotkey(field)
 
             if self.expires_at is not None and time.monotonic() >= self.expires_at:
                 if self.mouse_mode == "pointer":
@@ -1436,6 +1458,8 @@ class ReaderApp:
                 self._region_picker.cancel()
             except tk.TclError:
                 pass
+        if getattr(self, "wheel_listener", None) is not None:
+            self.wheel_listener.close()
         self.speech.shutdown()
         self.cues.shutdown()
         if getattr(self, "scan_frame", None) is not None:
